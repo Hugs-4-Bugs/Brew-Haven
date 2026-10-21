@@ -17,85 +17,83 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 
 
+/**
+ * JWT authentication filter.
+ *
+ * FIX (DEFECT_REGISTER A.5/A.6): the legacy filter stored claims/userName in INSTANCE
+ * fields of this singleton filter — concurrent requests raced on shared state (one
+ * request could read another request's role claims). All per-request state now lives
+ * in ThreadLocals that are strictly cleared in a finally block. isAdmin()/getCurrentUser()
+ * are null-safe and default to "not admin" / null when no token was processed.
+ */
 @Component
-public class JwtFilter extends OncePerRequestFilter {  // `OncePerRequestFilter` ensures that the filter is executed only once per request, preventing multiple invocations within the same request.
-    // JWT filter will be done here so we will create the bean of JwtUtil & CustomerUserDetailsService using @AutoWired annotation
+public class JwtFilter extends OncePerRequestFilter {
+
+    private static final ThreadLocal<Claims> CLAIMS = new ThreadLocal<>();
+    private static final ThreadLocal<String> USER_NAME = new ThreadLocal<>();
 
     @Autowired
-     private JwtUtil jwtUtil;
+    private JwtUtil jwtUtil;
+
     @Autowired
     private CustomerUserDetailsService service;
 
-    /**
-     * Same contract as for {@code doFilter}, but guaranteed to be
-     * just invoked once per request within a single request thread.
-     * See {@link #shouldNotFilterAsyncDispatch()} for details.
-     * <p>Provides HttpServletRequest and HttpServletResponse arguments instead of the
-     * default ServletRequest and ServletResponse ones.
-     *
-     * @param httpServletRequest
-     * @param httpServletResponse
-     * @param filterChain
-     */
-
-    Claims claims = null;
-    private String userName = null;
-
-
     @Override
     protected void doFilterInternal(HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse, FilterChain filterChain) throws ServletException, IOException {
+        try {
+            if (httpServletRequest.getServletPath().matches("/user/login|/user/signup|/user/forgotPassword")) {
+                // public endpoints — no token validation required
+                filterChain.doFilter(httpServletRequest, httpServletResponse);
+            } else {
+                String authorizationHeader = httpServletRequest.getHeader("Authorization");
+                String token = null;
+                String userName = null;
 
-       // skip the validation for public endpoints
-        /**
-//        if(httpServletRequest.getServletPath().matches("/user/login | /user/signup | /user/forgotPassword")){
-
-         Above 👆You are using the | (logical OR operator) in the matches() method, but it is not functioning as intended.
-         In regular expressions, | means "or", but your string is not properly formatted for that. It should be a
-         proper regular expression where the paths are separated by | without spaces, like this 👇:
-         */
-
-        if(httpServletRequest.getServletPath().matches("/user/login|/user/signup|/user/forgotPassword")){  // if this condition is satisfied then no teken validation is required
-            filterChain.doFilter(httpServletRequest, httpServletResponse);
-        } else {     // otherwise do filteration if user details not found/matches
-            String authorizationHeader = httpServletRequest.getHeader("Authorization");  // this Authorization is same which is present in postman
-            String token = null;
-
-            // here we are extracting the values 👇
-            if(authorizationHeader != null && authorizationHeader.startsWith("Bearer ")){   // total 7 character including 1 space as [Bearer ]
-                token = authorizationHeader.substring(7); // count of character "Bearer " with 1 space
-                userName = jwtUtil.extractUsername(token);
-                claims = jwtUtil.extractAllClaims(token);
-
-            }
-            // here 👇 now we have to check for the values if they are valid or not and also we have to check for the session for the user
-            if(userName != null && SecurityContextHolder.getContext().getAuthentication() == null){
-                UserDetails userDetails = service.loadUserByUsername(userName); // this is the username which we have extracted from token
-                if(jwtUtil.validateToken(token, userDetails)){
-                    UsernamePasswordAuthenticationToken usernamePasswordAuthenticationToken = new UsernamePasswordAuthenticationToken(userDetails,
-                            null, userDetails.getAuthorities());
-                    usernamePasswordAuthenticationToken.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(httpServletRequest)
-                    );
-                    SecurityContextHolder.getContext().setAuthentication(usernamePasswordAuthenticationToken);
-
+                if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+                    token = authorizationHeader.substring(7);
+                    // FIX: malformed/expired/tampered tokens must degrade to "unauthenticated"
+                    // (-> 403 via the security chain), never surface as a 500 from the filter.
+                    try {
+                        userName = jwtUtil.extractUsername(token);
+                        CLAIMS.set(jwtUtil.extractAllClaims(token));
+                    } catch (Exception e) {
+                        userName = null;
+                        CLAIMS.remove();
+                    }
                 }
-            }
+                USER_NAME.set(userName);
 
-            // now the validation is done and afterthat we'll do filterChain().doFilter() and let the user pass and access out API and get the response
-            filterChain.doFilter(httpServletRequest, httpServletResponse);
+                if (userName != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                    UserDetails userDetails = service.loadUserByUsername(userName);
+                    if (jwtUtil.validateToken(token, userDetails)) {
+                        UsernamePasswordAuthenticationToken usernamePasswordAuthenticationToken =
+                                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                        usernamePasswordAuthenticationToken.setDetails(
+                                new WebAuthenticationDetailsSource().buildDetails(httpServletRequest));
+                        SecurityContextHolder.getContext().setAuthentication(usernamePasswordAuthenticationToken);
+                    }
+                }
+                filterChain.doFilter(httpServletRequest, httpServletResponse);
+            }
+        } finally {
+            // ThreadLocals MUST be cleared so pooled threads never leak another request's identity.
+            CLAIMS.remove();
+            USER_NAME.remove();
         }
     }
 
-    // method to check the user is Admin/User and to get the user's name
-    public boolean isAdmin(){
-        return "admin".equalsIgnoreCase((String) claims.get("role"));  // for Admin role
-    }
-    public boolean isUser(){
-        return "user".equalsIgnoreCase((String) claims.get("role"));  // for User role
+    /** Null-safe role check (FIX A.6: previously NPE when claims was null). */
+    public boolean isAdmin() {
+        Claims claims = CLAIMS.get();
+        return claims != null && "admin".equalsIgnoreCase(String.valueOf(claims.get("role")));
     }
 
-    public String getCurrentUser(){   // to get username
-        return userName;    // this is userName which we have extracted from token itself
+    public boolean isUser() {
+        Claims claims = CLAIMS.get();
+        return claims != null && "user".equalsIgnoreCase(String.valueOf(claims.get("role")));
+    }
 
+    public String getCurrentUser() {
+        return USER_NAME.get();
     }
 }

@@ -6,22 +6,17 @@ import javax.persistence.*;
 
 /**
  * Represents a payment made using a credit/debit card.
+ *
+ * FIX (Issue #3 + E2E): card columns are nullable and now declared ONCE on the parent
+ * (Payment) — this subclass previously redeclared them with nullable=false, which (a)
+ * broke UPI/WALLET inserts under single-table inheritance and (b) shadowed the parent
+ * mapping. The class remains as the discriminator subtype for typed endpoints.
+ * CVV is transient and never persisted.
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
 @Entity
 @DiscriminatorValue("CARD") // Discriminator value for Card payments
 public class CardPayment extends Payment {
-
-    @Column(nullable = false)
-    private String cardNumber; // Last 4 digits of the card (store only masked version)
-
-    @Column(nullable = false)
-    private String cardHolderName;
-
-    @Column(nullable = false)
-    private String cardExpiry;
-
-    @Transient // Do not store CVV in the database for security reasons
-    private String cvv;
+    // all fields inherited from Payment (cardNumber, cardHolderName, cardExpiry, cvv)
 }

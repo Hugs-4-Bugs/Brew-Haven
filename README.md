@@ -1,288 +1,108 @@
 # Cafe Management System
 
-Welcome to the **Cafe Management System** repository! This project is designed to help manage a cafe, including tracking categories, items, and handling billing with PDF generation and a detailed dashboard for efficient management.
+Full-stack cafe management: POS billing with UPI/card/wallet/cash payments, self-contained
+UPI QR (configured merchant payee), PDF receipts, product & category management, Excel bulk
+import with structured per-row reporting, user administration with approval workflow, and a
+dashboard with real analytics.
 
-## Frontend: 
- https://github.com/Hugs-4-Bugs/Cafe-Management-Frontend
+- **Backend**: Java 17 · Spring Boot 2.7 · Spring Security (JWT) · JPA/Hibernate · MySQL 8 · Apache POI · iText · ZXing
+- **Frontend**: React 18 · TypeScript (strict) · Vite · React Router · GSAP (reduced-motion aware)
 
-## Features
+## Repository layout
 
-- **Product & Category Management:** Add, update, and manage products and their respective categories.
-- **Billing & PDF Generation:** Generate bills in PDF format for customer orders.
-- **Dashboard:** View and manage cafe items with detailed statistics and insights.
-- **Order Tracking:** Track orders and their statuses.
-- **User Authentication:** Role-based login system for admin and staff access.
-- **Database Integration:** Store all cafe information in a MySQL database.
-- **Excel Data Import:** Import product data from Excel files for easy bulk addition.
+```
+├── src/                    # Spring Boot backend (com.inn.cafe: Rest/RestImpl/Service/ServiceImpl/
+│                           #   DAO/POJO/Wrapper/JWT/Utils/Config/Constents — original structure preserved)
+├── frontend/               # React + TypeScript SPA (Vite)
+├── scripts/sql/            # DB migration scripts for pre-existing databases
+├── docs/                   # Audit, deployment, security, backup, limitations, test evidence
+├── ProductDetails*.xlsx    # Sample Excel import files
+└── .github/workflows/      # Backend CI (JDK17 + MySQL service) & Frontend CI
+```
 
-## Tech Stack
+## Quick start (local)
 
-- **Backend:** Java, Spring Boot, Hibernate, JPA
-- **Database:** MySQL
-- **Frontend:** Thymeleaf (for views), Bootstrap (for styling)
-- **PDF Generation:** Apache PDFBox
-- **Excel Parsing:** Apache POI
-- **Authentication:** Spring Security, JWT for user authentication
+### 1. Prerequisites
+- JDK 17+ (builds on 17 and 21)
+- MySQL 8 (or MariaDB 10.6+)
+- Node.js 20+ (frontend only)
 
-## Project Setup
-
-### Prerequisites
-
-- Java 11 or above
-- MySQL
-- Maven
-- Spring Boot
-
-### 1. Clone the Repository
+### 2. Backend
 
 ```bash
-git clone https://github.com/Hugs-4-Bugs/Cafe-Management-System.git
-cd Cafe-Management-System
+# configure (defaults work for a local root-password-less MySQL; override via env in real envs)
+export DB_URL='jdbc:mysql://localhost:3306/CafeMgt?createDatabaseIfNotExist=true'
+export DB_USERNAME=root
+export DB_PASSWORD=''
+# first admin (created at startup when no admin exists; optional but recommended)
+export CAFE_BOOTSTRAP_ADMIN_EMAIL=admin@cafe.local
+export CAFE_BOOTSTRAP_ADMIN_PASSWORD='choose-a-strong-password'
+# UPI QR merchant payee (required for QR generation; QR fails safe with 503 when unset)
+export CAFE_UPI_PAYEE_VPA='yourmerchant@upi'
+
+mvn spring-boot:run         # -> http://localhost:8000 (Swagger UI: /swagger-ui/index.html)
 ```
 
-### 2. Configure Database
-
-Create a MySQL database for the application and update the `application.properties` with the correct database details:
-
-```properties
-spring.datasource.url=jdbc:mysql://localhost:3306/cafe_management_system
-spring.datasource.username=root
-spring.datasource.password=password
-spring.jpa.hibernate.ddl-auto=update
-```
-
-### 3. Build and Run the Application
-
-#### Using Maven:
+On a database created by the LEGACY version of this app, apply the one-time migration first:
 ```bash
-mvn clean install
-mvn spring-boot:run
+mysql CafeMgt < scripts/sql/V20261021_01__payment_mapping_fix.sql
 ```
 
-#### Or by running the `CafeManagementSystemApplication` class from your IDE.
+### 3. Frontend
 
-### 4. Access the Application
-
-Once the application is running, you can access it at:
-
-```
-http://localhost:8080
+```bash
+cd frontend
+npm install
+npm run dev                 # -> http://localhost:5173 (proxies API to :8000)
 ```
 
-### 5. User Authentication
+Production build: `npm run build` → `frontend/dist` (serve statically; see docs/DEPLOYMENT.md).
 
-- **Admin login:** admin@example.com / adminpassword
-- **Staff login:** staff@example.com / staffpassword
+### 4. First login
+Sign-up creates `role=user, status=false` accounts that require admin approval. The
+bootstrap admin (env vars above) is the only account that can log in on a fresh database.
+Alternatively insert an admin manually with a bcrypt password hash.
 
-## Endpoints
+## Test & verify
 
-### 1. **Product Management**
-
-- **GET /products** - View all products
-- **POST /products** - Add a new product
-- **PUT /products/{id}** - Update product details
-- **DELETE /products/{id}** - Delete a product
-
-### 2. **Category Management**
-
-- **GET /categories** - View all categories
-- **POST /categories** - Add a new category
-- **PUT /categories/{id}** - Update category details
-- **DELETE /categories/{id}** - Delete a category
-
-### 3. **Order Management**
-
-- **GET /orders** - View all orders
-- **POST /orders** - Create a new order
-- **PUT /orders/{id}** - Update order status
-- **DELETE /orders/{id}** - Cancel an order
-
-### 4. **PDF Billing**
-
-- **GET /orders/{id}/bill** - Generate PDF bill for a specific order
-
-## PDF Generation
-
-The system uses Apache PDFBox to generate PDF bills for customer orders. When an order is placed, a PDF version of the bill can be downloaded.
-
-## Dashboard
-
-The dashboard provides an overview of:
-
-- Total sales
-- Number of orders
-- Product and category distribution
-- Pending orders
-
---- 
-
-## Project Structure
-
-```
-📦 cafe-management-system
-│── 📂 .github
-│── 📂 Bill Document
-│── 📂 src
-│   ├── 📂 main
-│   │   ├── 📂 java/com/inn/cafe
-│   │   │   ├── 📂 Config
-│   │   │   │   ├── SwaggerConfig.java
-│   │   │   ├── 📂 Constants
-│   │   │   │   ├── CafeConstants.java
-│   │   │   ├── 📂 DAO
-│   │   │   │   ├── BillDao.java
-│   │   │   │   ├── CategoryDao.java
-│   │   │   │   ├── PaymentDao.java
-│   │   │   │   ├── ProductDao.java
-│   │   │   │   ├── UserDao.java
-│   │   │   ├── 📂 JWT
-│   │   │   │   ├── CustomerUserDetailsService.java
-│   │   │   │   ├── JwtFilter.java
-│   │   │   │   ├── JwtUtil.java
-│   │   │   │   ├── SecurityConfig.java
-│   │   │   ├── 📂 POJO
-│   │   │   │   ├── Bill.java
-│   │   │   │   ├── CardPayment.java
-│   │   │   │   ├── Category.java
-│   │   │   │   ├── Payment.java
-│   │   │   │   ├── PaymentType.java
-│   │   │   │   ├── Product.java
-│   │   │   │   ├── UPIPayment.java
-│   │   │   │   ├── User.java
-│   │   │   │   ├── WalletPayment.java
-│   │   │   ├── 📂 Rest
-│   │   │   │   ├── BillRest.java
-│   │   │   │   ├── CategoryRest.java
-│   │   │   │   ├── DashBoardRest.java
-│   │   │   │   ├── PaymentRest.java
-│   │   │   │   ├── ProductRest.java
-│   │   │   │   ├── UserRest.java
-│   │   │   ├── 📂 RestImpl
-│   │   │   │   ├── BillRestImpl.java
-│   │   │   │   ├── CategoryRestImpl.java
-│   │   │   │   ├── DashBoardRestImpl.java
-│   │   │   │   ├── PaymentRestImpl.java
-│   │   │   │   ├── ProductRestImpl.java
-│   │   │   │   ├── UserRestImpl.java
-│   │   │   ├── 📂 Service
-│   │   │   │   ├── BillService.java
-│   │   │   │   ├── CategoryService.java
-│   │   │   │   ├── DashBoardService.java
-│   │   │   │   ├── ExcelService.java
-│   │   │   │   ├── PaymentService.java
-│   │   │   │   ├── ProductService.java
-│   │   │   │   ├── UserService.java
-│   │   │   ├── 📂 ServiceImpl
-│   │   │   │   ├── BillServiceImpl.java
-│   │   │   │   ├── CategoryServiceImpl.java
-│   │   │   │   ├── DashBoardServiceImpl.java
-│   │   │   │   ├── PaymentServiceImpl.java
-│   │   │   │   ├── ProductServiceImpl.java
-│   │   │   │   ├── UserServiceImpl.java
-│   │   │   ├── 📂 Utils
-│   │   │   │   ├── CafeUtils.java
-│   │   │   │   ├── EmailUtils.java
-│   │   │   │   ├── PaymentUtils.java
-│   │   │   ├── 📂 Wrapper
-│   │   │   │   ├── PaymentWrapper.java
-│   │   │   │   ├── ProductWrapper.java
-│   │   │   │   ├── UserWrapper.java
-│   │   │   ├── CafeManagementSystemApplication.java
-│   │   ├── 📂 resources
-│   │   │   ├── application.properties
-│   ├── 📂 test
-│   │   ├── 📂 java/com/inn/cafe
-│   │   │   ├── 📂 Service
-│   │   │   │   ├── CategoryServiceIT.java
-│   │   │   │   ├── CategoryServiceTest.java
-│   │   │   │   ├── PaymentServiceTest.java
-│   │   │   ├── CafeManagementSystemApplicationTests.java
-│── 📂 target
-│── Dockerfile
-│── cafe-Dependency.txt
-│── HELP.md
-│── html Msg.pdf
-│── mvnw
-│── mvnw.cmd
-│── pom.xml
-│── ProductDetails.xlsx
-│── ProductDetails12.xlsx
-│── External Libraries
-│── Scratches and Consoles
+```bash
+mvn verify                                  # backend: 45 unit tests + integration test
+cd frontend && npm test && npm run build    # frontend: 28 tests + typecheck + production build
 ```
 
+## API overview (authoritative contract)
 
+Interactive: Swagger UI at `/swagger-ui/index.html`, OpenAPI JSON at `/v3/api-docs`.
+Full inventory incl. request/response shapes: [docs/audit/ENDPOINT_INVENTORY.md](docs/audit/ENDPOINT_INVENTORY.md).
 
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /user/signup` `POST /user/login` `GET /user/checkToken` `POST /user/changePassword` `POST /user/forgotPassword` |
+| Users (admin) | `GET /user/get` `POST /user/update` |
+| Categories | `POST /category/add` `GET /category/get[?filterValue=true]` `POST /category/update` |
+| Products | `POST /product/add` `GET /product/get` `POST /product/update` `POST /product/delete/{id}` `POST /product/updateStatus` `GET /product/getByCategory/{id}` `GET /product/getById/{id}` `GET /product/productList` `POST /product/uploadExcel` (admin) |
+| Billing | `POST /bill/generateReport` `GET /bill/getBills` `GET+POST /bill/getPdf` `POST /bill/delete/{id}` (admin) |
+| Dashboard | `GET /dashboard/details` |
+| Payments | `POST /api/payment/process` `POST /api/payment/upi/verify` `POST /api/payment/upi/pay` `POST /api/payment/upi/qr-pay` `POST /api/payment/wallet/pay` `GET /api/payment/all` (admin) `GET /api/payment/{id}` (admin) `GET /api/payment/generate-qr/{upiId}/{amount}` |
 
-## How to Use the Application
+## Documentation index
 
-1. Log in as an **Admin** or **Staff**.
-2. Add products and categories through the **Product Management** and **Category Management** sections.
-3. Place orders for customers and manage their statuses.
-4. Generate PDF bills for completed orders from the **Order Management** section.
-5. View sales and order statistics on the **Dashboard**.
+| Document | Contents |
+|---|---|
+| [docs/audit/DEFECT_REGISTER.md](docs/audit/DEFECT_REGISTER.md) | Every defect found (evidence-quoted), incl. Issues #2/#3/#4 |
+| [docs/audit/REQUIREMENTS_MATRIX.md](docs/audit/REQUIREMENTS_MATRIX.md) | Requirements → status classification |
+| [docs/audit/ENDPOINT_INVENTORY.md](docs/audit/ENDPOINT_INVENTORY.md) | Complete API contract + frontend consumer map |
+| [docs/ISSUE_FIXES.md](docs/ISSUE_FIXES.md) | Issue #2/#3/#4 fix notes + verification evidence |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Env vars, production hardening, PostgreSQL strategy |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security review results & recommendations |
+| [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) | RPO/RTO, backup & tested-restore procedure |
+| [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) | Honest limitations of the current architecture |
+| [docs/TEST_EVIDENCE.md](docs/TEST_EVIDENCE.md) | Test results, E2E logs, final verification |
 
-## Sample Excel Format for Data Import
+## Notes on this fork's fixes
 
-You can import product and category data into the database using an Excel file. Below is the sample format for the Excel sheet:
-
-### **Product Data** (Sheet Name: **Products**)
-
-
-| id  | description                                      | name                | price | status    | category_name |
-|-----|--------------------------------------------------|---------------------|-------|-----------|---------------|
-| 1   | Veggie Pizza with olives                        | Veggie Pizza        | 199   | available | Italian       |
-| 2   | South Indian Masala Dosa                        | Masala Dosa         | 139   | available | Indian        |
-| 3   | Spicy Paneer Samosa with chutney                | Paneer Samosa       | 79    | available | Snacks        |
-| 4   | Litti-Chokha with roasted baingan               | Litti Chokha        | 149   | available | Bihari        |
-| 5   | Butter Naan with garlic                        | Butter Naan         | 89    | available | Indian        |
-| 6   | Lime-Mint Juice with fresh lemon                | Lime Juice          | 69    | available | Beverages     |
-| 7   | Veggie Fried Rice with mixed veggies             | Veg Fried Rice       | 129   | available | Fried-Rice    |
-| 8   | Tandoori Roti with butter                      | Tandoori Roti       | 79    | available | Roti sabji    |
-| 9   | Cold Coffee with ice cream                     | Cold Coffee         | 159   | available | Cold Coffee   |
-| 10  | Spicy Aloo Tikki with chutney                  | Aloo Tikki          | 89    | available | Dosa          |
-| 11  | Sweet Lassi with mango flavor                  | Mango Lassi         | 69    | available | Lassi         |
-| 12  | Paneer Butter Masala                           | Paneer Butter Masala| 179   | available | Indian        |
-| 13  | Chole Bhature with onions                      | Chole Bhature       | 119   | available | Indian        |
-| 14  | Vegetable Manchurian with rice                 | Veg Manchurian      | 169   | available | Chinese       |
-| 15  | Pani Puri with chutney                        | Pani Puri           | 59    | available | Snacks        |
-
-
-
-### Category Table Data
-| id  | name           | version |
-|-----|----------------|---------|
-| 1   | Italian        | 0       |
-| 2   | Indian         | 0       |
-| 3   | Snacks         | 0       |
-| 4   | Bihari         | 0       |
-| 5   | Beverages      | 0       |
-| 6   | Fried-Rice     | 0       |
-| 7   | Roti sabji     | 0       |
-| 8   | Cold Coffee    | 0       |
-| 9   | Dosa           | 0       |
-| 10  | Lassi          | 0       |
-| 11  | Chinese        | 0       |
-
-
-Make sure to follow this format while creating the Excel file to ensure the proper data structure. The **category_name** in the **Product** sheet should match an existing **category_name** from the **Categories** sheet for successful import.
-
-### How to Upload Excel Data
-
-- Navigate to the "Product Management" section of the dashboard.
-- Click the "Import from Excel" button.
-- Upload the properly formatted Excel file.
-- The system will read the data and insert it into the database.
-
-## Contribution
-
-If you'd like to contribute to this project, feel free to:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bugfix.
-3. Submit a pull request.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
+This repository received a full-stack production-hardening pass (2026-10-21) — see
+[docs/ISSUE_FIXES.md](docs/ISSUE_FIXES.md) for the complete, evidence-backed list:
+Excel import ID-independence + structured reporting (Issue #2), UPI persistence/verification
+incl. same-ID repeat payments (Issue #3), configured-merchant self-contained UPI QR (Issue #4),
+plus 25+ collateral defect fixes discovered by source audit and live end-to-end testing.

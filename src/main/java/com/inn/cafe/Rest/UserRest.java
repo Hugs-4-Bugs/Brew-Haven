@@ -37,8 +37,10 @@ public interface UserRest {
 
 
     // method for FORGET PASSWORD using @RequestBody 👇👇👇👇👇 when the user doesn't remember it
+    // FIX (DEFECT_REGISTER A.3 note): @RequestBody is declared on the INTERFACE so the JSON
+    // body binds reliably regardless of which layer Spring reads the annotation from.
     @PostMapping(path = "/forgotPassword")
-    ResponseEntity<String> forgotPassword(Map<String, String> requestMap);
+    ResponseEntity<String> forgotPassword(@RequestBody(required = false) Map<String, String> requestMap);
 
 
 //    // method for FORGET PASSWORD using @RequestParam 👇👇👇👇👇

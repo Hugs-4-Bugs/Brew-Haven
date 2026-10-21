@@ -209,8 +209,14 @@ public class UserServiceImpl implements UserService {
                 if (!optional.isEmpty()) {
                     userDao.updateStatus(requestMap.get("status"), Integer.parseInt(requestMap.get("id")));
 
-                    // to notify all the admin about the modification in user/admin account status for account enable/disable with particular id
-                    sendMailToALlAdmin(requestMap.get("status"), optional.get().getEmail(), userDao.getAllAdmin());
+                    // Notification email is best-effort: a mail outage must NOT turn a
+                    // successful status update into a 500 (the legacy behavior reported
+                    // "Something Went Wrong" while the update had already persisted).
+                    try {
+                        sendMailToALlAdmin(requestMap.get("status"), optional.get().getEmail(), userDao.getAllAdmin());
+                    } catch (Exception mailEx) {
+                        log.warn("Admin notification mail could not be sent (status update itself succeeded): {}", mailEx.getMessage());
+                    }
 
                     return CafeUtils.getResponseEntity("User Status Updated Successfully", HttpStatus.OK);
                 } else {
@@ -250,21 +256,27 @@ public class UserServiceImpl implements UserService {
     @Override
     public ResponseEntity<String> changePassword(Map<String, String> requestMap) {
         try {
-// Find the user by email (from token)
-// to change the password first we have to find the user by email from the token(from token you will get the current user)
+            String oldPassword = requestMap.get("oldPassword");
+            String newPassword = requestMap.get("newPassword");
+            if (oldPassword == null || newPassword == null || newPassword.length() < 6) {
+                return CafeUtils.getResponseEntity("Invalid Data: oldPassword is required and newPassword must be at least 6 characters", HttpStatus.BAD_REQUEST);
+            }
+            // FIX (DEFECT_REGISTER A.1/A.2): find the user by email (from token); the legacy
+            // code called userObj.equals(null) (NPE risk) and stored the NEW password in
+            // PLAINTEXT, which permanently locked the user out (DaoAuthenticationProvider
+            // compares against the bcrypt hash).
             User userObj = userDao.findByEmail(jwtFilter.getCurrentUser());
-            if (!userObj.equals(null)) {    // Check if the user exists
-                if (passwordEncoder.matches(requestMap.get("oldPassword"), userObj.getPassword())) {
-                    // Hash the new password before saving it
-                    userObj.setPassword(requestMap.get("newPassword"));
-                    userDao.save(userObj);  // // Save the updated user object
+            if (userObj != null) {
+                if (passwordEncoder.matches(oldPassword, userObj.getPassword())) {
+                    userObj.setPassword(passwordEncoder.encode(newPassword)); // FIX: encode before saving
+                    userDao.save(userObj);
                     return CafeUtils.getResponseEntity("Password Updated Successfully", HttpStatus.OK);
                 }
                 return CafeUtils.getResponseEntity("Incorrect Old Password", HttpStatus.BAD_REQUEST);
             }
             return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("changePassword failed: {}", ex.getMessage());
         }
         return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -298,20 +310,46 @@ public class UserServiceImpl implements UserService {
     @Override
     public ResponseEntity<String> forgotPassword(Map<String, String> requestMap) {
         try {
-            /** with the help of email id we can get only the email id. we can't return the userId and Password to a particular user on the basis of email simply,
-             and for that we will fetch the user data from database, and we will return the particular userId and Password to specific mail on which we have received
-             through User user = userDao.findByEmail(requestMap.get("email")); */
-            User user = userDao.findByEmail(requestMap.get("email"));   // on this mail user will receive the userId and Password
+            String email = requestMap == null ? null : requestMap.get("email");
+            User user = (email == null || email.isBlank()) ? null : userDao.findByEmail(email.trim());
 
-            // If the email exists in the database, send the password to the user's email.
-            if (!Objects.isNull(user) && !Strings.isNullOrEmpty(user.getEmail()))
-//                The below `forgotMail` method from `EmailUtils` sends the user's password to their email when they request a password reset.
-                emailUtils.forgotMail(user.getEmail(), "Credentials by Cafe Management System", user.getPassword());
+            // FIX (DEFECT_REGISTER A.3): the legacy implementation emailed the user's
+            // BCRYPT HASH (useless to the user and a sensitive-data leak) and could not
+            // actually restore access. The fixed flow generates a one-time temporary
+            // password (SecureRandom), persists it bcrypt-encoded, and emails it via
+            // EmailUtils.forgotMail. The response is intentionally GENERIC for both
+            // known and unknown emails to prevent account enumeration.
+            if (user != null && !Strings.isNullOrEmpty(user.getEmail())) {
+                String tempPassword = generateTemporaryPassword();
+                user.setPassword(passwordEncoder.encode(tempPassword));
+                userDao.save(user);
+                try {
+                    emailUtils.forgotMail(user.getEmail(), "Credentials by Cafe Management System", tempPassword);
+                    log.info("Forgot-password: temporary credentials mailed to registered address");
+                } catch (Exception mailEx) {
+                    // mail failure must be reported honestly — do NOT claim success
+                    log.error("Forgot-password mail sending failed: {}", mailEx.getMessage());
+                    return CafeUtils.getResponseEntity("Unable to send email right now. Please try again later or contact support.", HttpStatus.INTERNAL_SERVER_ERROR);
+                }
+            } else {
+                log.warn("Forgot-password requested for unknown or blank email");
+            }
             return CafeUtils.getResponseEntity("Check your mail for Credentials", HttpStatus.OK);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("forgotPassword failed: {}", ex.getMessage());
         }
         return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    /** Cryptographically random temporary password: 12 chars from A-Za-z0-9. */
+    private static String generateTemporaryPassword() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(12);
+        for (int i = 0; i < 12; i++) {
+            sb.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return sb.toString();
     }
 
 }

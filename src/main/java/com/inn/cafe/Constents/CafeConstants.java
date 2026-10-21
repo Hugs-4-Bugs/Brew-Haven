@@ -27,7 +27,8 @@ public class CafeConstants {
 
     public static final String  UNAUTHOROZED_ACCESS = "Unauthorized access";
 
-    public static final String STORE_LOCATION = "/Users/prabhatkumar/Downloads/com.inn.cafe/Bill Document";
+    // REMOVED (FIX B.1): hardcoded developer-machine PDF path. The store location is now
+    // the configurable property cafe.bill.store-location (default ./Bill Document).
 
 }
 

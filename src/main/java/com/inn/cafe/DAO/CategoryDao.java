@@ -21,6 +21,9 @@ public interface CategoryDao extends JpaRepository<Category, Integer> {
 
     boolean existsByName(String name); // This checks if a category with the given name exists (implemented by Prabhat)
 
+    // FIX P.2: case-insensitive duplicate check for category creation
+    boolean existsByNameIgnoreCase(String name);
+
 
 //    Category findByName(String name);
 

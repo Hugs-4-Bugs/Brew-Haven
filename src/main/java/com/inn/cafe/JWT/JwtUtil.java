@@ -13,8 +13,11 @@ import java.util.function.Function;
 
 @Service
 public class JwtUtil {
-//    private String secret = System.getenv("itachiuchiha");   // Externalized secret for better security
-    private String secret = "itachiuchiha12345678901234567890itachiuchiha12345678901234567890itachiuchiha12345678901234567890";
+    // FIX (security hardening): secret externalized to configuration (cafe.jwt.secret /
+    // JWT_SECRET env) with a dev-only default so existing local setups keep working.
+    // Production MUST override it — see docs/DEPLOYMENT.md.
+    @org.springframework.beans.factory.annotation.Value("${cafe.jwt.secret:itachiuchiha12345678901234567890itachiuchiha12345678901234567890itachiuchiha12345678901234567890}")
+    private String secret;
 
 
     /**

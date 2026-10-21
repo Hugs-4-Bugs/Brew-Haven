@@ -96,10 +96,19 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 //                 or it Specifies which URLs are publicly accessible.
                 .antMatchers("/user/login","/user/signup","/user/forgotPassword").permitAll()
 
+                // FIX (DEFECT_REGISTER A.9): permit the /error dispatch so unauthenticated
+                // requests to missing/broken endpoints return proper 404/500 semantics
+                // instead of a misleading 403.
+                .antMatchers("/error").permitAll()
+
+                // NOTE (DEFECT_REGISTER A.8): the legacy matcher "/api/category/**" never
+                // matched the real /category/** paths and was removed. Admin enforcement for
+                // /category/**, /product/** mutations, /user/get, /user/update, bill deletion
+                // and Excel upload is performed authoritatively at the service layer via
+                // JwtFilter.isAdmin().
+
 //                .permitAll() Grants unrestricted access to the specified URLs.
 //                .permitAll()
-
-                .antMatchers("/api/category/**").hasRole("ADMIN")
 
                 // used for Swagger Implementation
                 .antMatchers(

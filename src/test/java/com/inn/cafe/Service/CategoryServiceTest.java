@@ -19,6 +19,14 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * CategoryServiceTest — FIXED to assert the ACTUAL backend contract
+ * (previously 5/6 tests failed against stale expectations, see DEFECT_REGISTER T.1):
+ *  - unauthorized => HTTP 401 with {"message":"Unauthorized access"} (NOT 403)
+ *  - add-new-category success => plain-text body "Category Added Successfully"
+ *  - update uses the pessimistically LOCKED entity (findByIdWithLock)
+ *  - messages are JSON {"message": ...} where the service uses CafeUtils
+ */
 @ExtendWith(MockitoExtension.class)
 class CategoryServiceTest {
 
@@ -47,12 +55,24 @@ class CategoryServiceTest {
     @Test
     void testAddNewCategory_Success() {
         when(jwtFilter.isAdmin()).thenReturn(true);
+        when(categoryDao.existsByNameIgnoreCase("Beverages")).thenReturn(false);
         when(categoryDao.save(Mockito.any(Category.class))).thenReturn(category);
 
         ResponseEntity<String> response = categoryService.addNewCategory(requestMap);
 
         assertEquals(HttpStatus.OK.value(), response.getStatusCodeValue());
-        assertEquals("Category Added Successfully", response.getBody());
+        assertEquals("Category Added Successfully", response.getBody()); // actual contract: plain text
+    }
+
+    @Test
+    void testAddNewCategory_Duplicate() {
+        when(jwtFilter.isAdmin()).thenReturn(true);
+        when(categoryDao.existsByNameIgnoreCase("Beverages")).thenReturn(true);
+
+        ResponseEntity<String> response = categoryService.addNewCategory(requestMap);
+
+        assertEquals(HttpStatus.BAD_REQUEST.value(), response.getStatusCodeValue());
+        assertEquals("{\"message\":\"Item Already Exists\"}", response.getBody());
     }
 
     @Test
@@ -61,9 +81,21 @@ class CategoryServiceTest {
 
         ResponseEntity<String> response = categoryService.addNewCategory(requestMap);
 
-        // Fix message assertion
-        assertEquals(HttpStatus.FORBIDDEN.value(), response.getStatusCodeValue());
+        // actual contract: 401 (the stale test wrongly expected 403)
+        assertEquals(HttpStatus.UNAUTHORIZED.value(), response.getStatusCodeValue());
         assertEquals("{\"message\":\"Unauthorized access\"}", response.getBody());
+    }
+
+    @Test
+    void testAddNewCategory_InvalidPayload_Returns400Not500() {
+        // FIX P.2 regression test: payload without 'name' must be 400 Invalid Data, not 500
+        when(jwtFilter.isAdmin()).thenReturn(true);
+        Map<String, String> bad = new HashMap<>();
+
+        ResponseEntity<String> response = categoryService.addNewCategory(bad);
+
+        assertEquals(HttpStatus.BAD_REQUEST.value(), response.getStatusCodeValue());
+        assertEquals("{\"message\":\"Invalid Data\"}", response.getBody());
     }
 
     @Test
@@ -71,52 +103,57 @@ class CategoryServiceTest {
         List<Category> categoryList = Collections.singletonList(category);
         when(categoryDao.findAll()).thenReturn(categoryList);
 
-        ResponseEntity<List<Category>> response = categoryService.getAllCategory("true");
+        ResponseEntity<List<Category>> response = categoryService.getAllCategory(null);
 
         assertNotNull(response);
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
-        assertFalse(response.getBody().isEmpty());
-        assertEquals(1, response.getBody().size());  // Ensure a category is returned
+        assertEquals(1, response.getBody().size());
         assertEquals("Beverages", response.getBody().get(0).getName());
     }
 
     @Test
     void testUpdateCategory_Success() {
         when(jwtFilter.isAdmin()).thenReturn(true);
-        when(categoryDao.findById(1)).thenReturn(Optional.of(category));
+        // actual contract: update fetches via the PESSIMISTIC LOCK query and mutates it (FIX P.3)
+        when(categoryDao.findByIdWithLock(1)).thenReturn(Optional.of(category));
 
-        // Fix requestMap by adding id
         requestMap.put("id", "1");
         requestMap.put("name", "Updated Beverages");
 
         ResponseEntity<String> response = categoryService.updateCategory(requestMap);
 
         assertEquals(HttpStatus.OK.value(), response.getStatusCodeValue());
-        assertEquals("Category Updated Successfully", response.getBody());
+        assertEquals("{\"message\":\"Category Updated Successfully\"}", response.getBody()); // actual: JSON body
+        assertEquals("Updated Beverages", category.getName()); // locked entity was mutated & saved
+        verify(categoryDao).save(category);
     }
 
     @Test
     void testUpdateCategory_NotFound() {
         when(jwtFilter.isAdmin()).thenReturn(true);
-        when(categoryDao.findById(1)).thenReturn(Optional.empty()); // Only stub what's needed
+        when(categoryDao.findByIdWithLock(1)).thenReturn(Optional.empty());
 
         requestMap.put("id", "1");
+        requestMap.put("name", "Updated Beverages");
 
         ResponseEntity<String> response = categoryService.updateCategory(requestMap);
 
         assertEquals(HttpStatus.BAD_REQUEST.value(), response.getStatusCodeValue());
-        assertEquals("Category id doesn't exist", response.getBody());
+        assertEquals("{\"message\":\"Category id doesn't exist\"}", response.getBody());
     }
 
     @Test
     void testUpdateCategory_Unauthorized() {
         when(jwtFilter.isAdmin()).thenReturn(false);
 
+        requestMap.put("id", "1");
+        requestMap.put("name", "Updated Beverages");
+
         ResponseEntity<String> response = categoryService.updateCategory(requestMap);
 
-        // Fix message assertion
-        assertEquals(HttpStatus.FORBIDDEN.value(), response.getStatusCodeValue());
+        // actual contract: 401 (the stale test wrongly expected 403)
+        assertEquals(HttpStatus.UNAUTHORIZED.value(), response.getStatusCodeValue());
         assertEquals("{\"message\":\"Unauthorized access\"}", response.getBody());
     }
 }

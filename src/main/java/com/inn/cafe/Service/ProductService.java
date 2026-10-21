@@ -6,7 +6,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -29,7 +28,7 @@ public interface ProductService {
 
     ResponseEntity<ProductWrapper> getProductById(Integer id);
 
-    ResponseEntity<String> processExcelData(MultipartFile file);
+    // processExcelData was removed (dead, buggy manual-id duplicate of ExcelService) — see DEFECT_REGISTER 2.2.
 
     Page<Product> getAllProductList(Pageable pageable);
 }

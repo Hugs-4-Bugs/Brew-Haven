@@ -52,7 +52,7 @@ public class BillRestImpl implements BillRest {
         } catch (Exception ex) {
             ex.printStackTrace();
         }
-        return null;
+        return new ResponseEntity<>(new java.util.ArrayList<>(), HttpStatus.INTERNAL_SERVER_ERROR); // FIX B.7: never return null
     }
 
     // method to download/get the pdf of bill in case of user has lost it and if needed in future for business purpose
@@ -63,7 +63,13 @@ public class BillRestImpl implements BillRest {
         } catch (Exception ex) {
             ex.printStackTrace();
         }
-        return null;
+        return new ResponseEntity<>(new byte[0], HttpStatus.INTERNAL_SERVER_ERROR); // FIX B.7: never return null
+    }
+
+    // FIX B.3: browser-usable POST variant (fetch cannot send GET bodies)
+    @Override
+    public ResponseEntity<byte[]> getPdfPost(Map<String, Object> requestMap) {
+        return getPdf(requestMap);
     }
 
     @Override

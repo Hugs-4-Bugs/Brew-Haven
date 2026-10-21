@@ -10,22 +10,15 @@ import com.inn.cafe.Service.ProductService;
 import com.inn.cafe.Utils.CafeUtils;
 import com.inn.cafe.Wrapper.ProductWrapper;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import javax.transaction.Transactional;
-import java.io.InputStream;
 import java.util.*;
-import java.util.stream.Collectors;
 
 
 @Slf4j
@@ -48,7 +41,24 @@ public class ProductServiceImpl implements ProductService {
         try {
             if (jwtFilter != null && jwtFilter.isAdmin()) {
                 if (validateProductMap(requestMap, false)) {
-                    productDao.save(getProductFromMap(requestMap, false));
+                    // categoryId must resolve to an existing category (fix for DEFECT_REGISTER P.1:
+                    // previously a missing/unknown categoryId caused NumberFormatException/NPE -> 500)
+                    Integer categoryId = parsePositiveInt(requestMap.get("categoryId"));
+                    Optional<Category> managedCategory = categoryId == null
+                            ? Optional.empty() : categoryDao.findById(categoryId);
+                    if (managedCategory.isEmpty()) {
+                        return CafeUtils.getResponseEntity("Invalid Data: categoryId must be an id of an existing category", HttpStatus.BAD_REQUEST);
+                    }
+                    // FIX (discovered in E2E): getProductFromMap built a 'new Category(id)' with
+                    // version=null; with @Version on Category Hibernate treats that instance as
+                    // TRANSIENT and add/update fails with TransientPropertyValueException — the
+                    // REST add/update endpoints were broken. Use the MANAGED entity instead.
+                    Product product = getProductFromMap(requestMap, false, managedCategory.get());
+                    // default status so newly added products are visible to 'status=true' queries
+                    if (product.getStatus() == null || product.getStatus().isBlank()) {
+                        product.setStatus("true");
+                    }
+                    productDao.save(product);
                     return CafeUtils.getResponseEntity("Product Added Successfully.", HttpStatus.OK);
                 }
                 return CafeUtils.getResponseEntity(CafeConstants.INVALID_DATA, HttpStatus.BAD_REQUEST);
@@ -56,7 +66,7 @@ public class ProductServiceImpl implements ProductService {
                 return CafeUtils.getResponseEntity(CafeConstants.UNAUTHOROZED_ACCESS, HttpStatus.UNAUTHORIZED);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("addNewProduct failed: {}", ex.getMessage());
         }
         return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -103,10 +113,8 @@ public class ProductServiceImpl implements ProductService {
     /**
      * the getProductFromMap method will be used for both getting the product map or validating the product
      */
-    private Product getProductFromMap(Map<String, String> requestMap, boolean isAdd) {
-        Category category = new Category();
-        /** To match the expected data type in the database, as `id`, `categoryId`, and `price` are stored as integers, but requestMap stores them as strings. */
-        category.setId(Integer.parseInt(requestMap.get("categoryId")));
+    private Product getProductFromMap(Map<String, String> requestMap, boolean isAdd, Category managedCategory) {
+        Category category = managedCategory;
 
         Product product = new Product();  // creating object of the Product
         if (isAdd && requestMap.containsKey("id")) {
@@ -118,23 +126,18 @@ public class ProductServiceImpl implements ProductService {
         product.setPrice(Integer.parseInt(requestMap.get("price")));
         product.setStatus(requestMap.get("status"));
         return product;
+    }
 
-        /**
-         We create a Category object inside `getProductFromMap()` along with the Product object because:
-
-         1️⃣ Product belongs to a Category – A product must be linked to a category due to the `@ManyToOne` relationship between Product and Category.
-         2️⃣ Setting the Foreign Key – The Category object helps set the `category_fk` column in the Product table, ensuring proper database relationships.
-         3️⃣ Ensuring Data Consistency – Before saving a product, we must assign it a valid category to maintain data integrity.
-
-         ### Example:
-         If you're adding a new product like "Paneer", it should be assigned to the "Veg Dish" category.
-         To do this, we:
-         ✅ Create a Category object for "Veg Dish"
-         ✅ Assign this Category to the Paneer product
-         ✅ Save the Product (Paneer) with its linked Category (Veg Dish) in the database
-
-         Simply put – A product needs a category, so we create a Category object to establish that link before storing the product! 🚀
-         */
+    /** Null-safe integer parse for map values (fix for DEFECT_REGISTER P.1: NPE/500 on bad categoryId). */
+    private static Integer parsePositiveInt(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
 
@@ -158,11 +161,15 @@ public class ProductServiceImpl implements ProductService {
                     /** The server extracts the product ID from requestMap (sent by the client), converts it to an Integer (since findById() requires a number),
                      and checks if the product exists in productDao. And this will return the object of type Optional so, we will store it into the optional*/
 //                    Optional<Product> optional = productDao.findById(Integer.parseInt(requestMap.get("id")));
-                    Optional optional = productDao.findById(Integer.parseInt(requestMap.get("id")));
-                    if (!optional.isEmpty()) {
-                        /** If everything is correct, saves the updated product in the database
-                         after converting the request data into a proper product format using getProductFromMap(). */
-                        productDao.save(getProductFromMap(requestMap, true));
+                    Optional<Product> optional = productDao.findById(parsePositiveInt(requestMap.get("id")));
+                    if (optional.isPresent()) {
+                        Integer categoryId = parsePositiveInt(requestMap.get("categoryId"));
+                        Optional<Category> managedCategory = categoryId == null
+                                ? Optional.empty() : categoryDao.findById(categoryId);
+                        if (managedCategory.isEmpty()) {
+                            return CafeUtils.getResponseEntity("Invalid Data: categoryId must be an id of an existing category", HttpStatus.BAD_REQUEST);
+                        }
+                        productDao.save(getProductFromMap(requestMap, true, managedCategory.get()));
                         return CafeUtils.getResponseEntity("Product Updated Successfully", HttpStatus.OK);
                     } else {
                         return CafeUtils.getResponseEntity("Product id doesn't exists", HttpStatus.OK);
@@ -251,128 +258,13 @@ public class ProductServiceImpl implements ProductService {
         return new ResponseEntity<>(new ProductWrapper(), HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    public void validateAndSaveProducts(List<Product> products) {
-        List<Category> categories = categoryDao.findAll();
-        Set<Integer> validCategoryIds = categories.stream()
-                .map(Category::getId)
-                .collect(Collectors.toSet());
-
-        for (Product product : products) {
-            // Use product.getCategory().getId() instead of product.getCategoryFk()
-            if (validCategoryIds.contains(product.getCategory().getId())) {
-                productDao.save(product);
-            } else {
-                System.out.println("Invalid category ID: " + product.getCategory().getId());
-            }
-        }
-    }
-
-
-
-
-    // implementation to add the product in category from Excel file
-    @Override
-    public ResponseEntity<String> processExcelData(MultipartFile file) {
-        try (InputStream inputStream = file.getInputStream()) {
-            Workbook workbook;
-
-            // Detect file format (.xls or .xlsx)
-            if (file.getOriginalFilename().toLowerCase().endsWith(".xls")) {
-                workbook = new HSSFWorkbook(inputStream);
-            } else if (file.getOriginalFilename().toLowerCase().endsWith(".xlsx")) {
-                workbook = new XSSFWorkbook(inputStream);
-            } else {
-                return new ResponseEntity<>("Invalid file format. Please upload .xls or .xlsx", HttpStatus.BAD_REQUEST);
-            }
-
-            Sheet sheet = workbook.getSheetAt(0);
-
-            // Fetch the last inserted product to get the latest ID
-            Product lastProduct = productDao.findTopByOrderByIdDesc();
-            int newProductId = (lastProduct == null) ? 1 : lastProduct.getId() + 1;
-
-            for (Row row : sheet) {
-                if (row.getRowNum() == 0 || isRowEmpty(row)) continue;
-
-                String categoryName = getStringCellValue(row.getCell(0)).trim();  // Trim the category name
-                String productName = getStringCellValue(row.getCell(1));
-                double price = getNumericCellValue(row.getCell(2));
-                String status = getStringCellValue(row.getCell(3));
-
-                // Ensure Category exists by name (not by ID)
-                Category category = categoryDao.findByName(categoryName)
-                        .orElseGet(() -> {
-                            // If category doesn't exist, create a new one
-                            Category newCategory = new Category();
-                            newCategory.setName(categoryName);
-                            return categoryDao.saveAndFlush(newCategory);  // Save the new category to DB
-                        });
-
-                // Check if product already exists with the same name and category
-                Product existingProduct = productDao.findByNameAndCategory_Id(productName, category.getId());
-                if (existingProduct != null) {
-                    System.out.println("⚠️ Product " + productName + " already exists in category " + categoryName + ". Skipping.");
-                    continue;  // Skip if product already exists
-                }
-
-                // Create Product with new dynamic ID from the database
-                Product product = new Product();
-                product.setId(newProductId++);
-                product.setName(productName);
-                product.setPrice((int) price);
-                product.setStatus(status);
-                product.setCategory(category);
-
-                productDao.save(product); // Save into DB
-            }
-
-            workbook.close(); // Close workbook after processing
-
-            return new ResponseEntity<>("File uploaded and processed successfully.", HttpStatus.OK);
-        } catch (Exception e) {
-            return new ResponseEntity<>("Error processing file: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-
-    // ✅ Get String value from Excel cell safely
-    private String getStringCellValue(Cell cell) {
-        if (cell == null) return "";
-        if (cell.getCellType() == CellType.STRING) {
-            return cell.getStringCellValue();
-        } else if (cell.getCellType() == CellType.NUMERIC) {
-            return String.valueOf((int) cell.getNumericCellValue()); // Convert number to String
-        }
-        return "";
-    }
-
-    // ✅ Get Numeric value from Excel cell safely
-    private double getNumericCellValue(Cell cell) {
-        if (cell == null) return 0.0;
-        if (cell.getCellType() == CellType.NUMERIC) {
-            return cell.getNumericCellValue();
-        } else if (cell.getCellType() == CellType.STRING) {
-            try {
-                return Double.parseDouble(cell.getStringCellValue().trim()); // Convert String to double
-            } catch (NumberFormatException e) {
-                return 0.0; // Default to 0 if conversion fails
-            }
-        }
-        return 0.0;
-    }
-
-    // ✅ Check if a row is empty
-    private boolean isRowEmpty(Row row) {
-        if (row == null) return true;
-        for (int i = 0; i < row.getLastCellNum(); i++) {
-            Cell cell = row.getCell(i);
-            if (cell != null && cell.getCellType() != CellType.BLANK) {
-                return false; // Row is not empty
-            }
-        }
-        return true; // Row is empty
-    }
-
+    // NOTE (Issue #2 fix): the legacy duplicate Excel implementations that previously lived
+    // here (validateAndSaveProducts / processExcelData and their POI helpers) were removed.
+    // processExcelData manually assigned product ids from findTopByOrderByIdDesc()+1 which
+    // collided with the database auto-increment (root cause of the Excel-vs-DB id mismatch,
+    // DEFECT_REGISTER 2.2) and was not reachable from any REST path. The single authoritative
+    // implementation is now Service/ExcelService.parseAndImport (id-independent, structured
+    // reporting, thread-safe, transactional).
 
 
 // Pagination implementation

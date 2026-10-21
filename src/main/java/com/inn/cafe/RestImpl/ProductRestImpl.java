@@ -3,11 +3,14 @@ package com.inn.cafe.RestImpl;
 import com.inn.cafe.Constents.CafeConstants;
 import com.inn.cafe.DAO.ProductDao;
 import com.inn.cafe.POJO.Product;
+import com.inn.cafe.JWT.JwtFilter;
 import com.inn.cafe.Rest.ProductRest;
 import com.inn.cafe.Service.ExcelService;
 import com.inn.cafe.Service.ProductService;
 import com.inn.cafe.Utils.CafeUtils;
+import com.inn.cafe.Wrapper.ExcelImportResult;
 import com.inn.cafe.Wrapper.ProductWrapper;
+import com.google.gson.Gson;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,6 +38,9 @@ public class ProductRestImpl implements ProductRest {
 
     @Autowired
     private ExcelService excelService;
+
+    @Autowired
+    private JwtFilter jwtFilter;
 
     @Override
     public ResponseEntity<String> addNewProduct(@RequestBody Map<String, String> requestMap) {
@@ -108,32 +114,28 @@ public class ProductRestImpl implements ProductRest {
     }
 
 
-    // implementation to add the product in category from Excel file
+    /**
+     * Excel product import (Issue #2 fix).
+     * Admin-only. Returns a structured JSON report (ExcelImportResult) with per-row outcomes.
+     * Import is ID-independent: any sheet 'id' column is ignored by design.
+     */
     @Override
     public ResponseEntity<String> uploadExcel(MultipartFile file) {
         try {
-            List<Product> products = excelService.parseExcelFile(file);
-
-            if (products.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Uploaded file is empty or has invalid data.");
+            if (!jwtFilter.isAdmin()) {
+                return CafeUtils.getResponseEntity(CafeConstants.UNAUTHOROZED_ACCESS, HttpStatus.UNAUTHORIZED);
             }
-
-            // Log the products being processed, including their category ID
-            products.forEach(product -> {
-                System.out.println("Processing product: " + product.getName() + " with category ID: " + product.getCategory().getId());
-            });
-
-            // Save to database
-            productDao.saveAll(products);
-            return ResponseEntity.ok("File uploaded and data inserted successfully!");
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error reading Excel file: " + e.getMessage());
+            ExcelImportResult result = excelService.parseAndImport(file);
+            HttpStatus status = result.isParsed() ? HttpStatus.OK : HttpStatus.BAD_REQUEST;
+            return ResponseEntity.status(status).body(new Gson().toJson(result));
         } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Unexpected error: " + e.getMessage());
+            logOrPrint("uploadExcel failed", e);
+            return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    private void logOrPrint(String what, Exception e) {
+        org.slf4j.LoggerFactory.getLogger(ProductRestImpl.class).error("{}: {}", what, e.getMessage());
     }
 
     @Override

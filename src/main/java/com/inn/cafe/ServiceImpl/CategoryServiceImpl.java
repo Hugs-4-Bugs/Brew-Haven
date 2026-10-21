@@ -47,23 +47,25 @@ public class CategoryServiceImpl implements CategoryService {
             // only admin can add the category, so first we will check whether the current user is admin
             if (jwtFilter.isAdmin()) {
                 if (validateCategoryMap(requestMap, false)) {
-                    // this is implemented by Prabhat
-                    String categoryName = requestMap.get("name").trim();
+                    String categoryName = requestMap.get("name") == null ? "" : requestMap.get("name").trim();
                     if (categoryName.isEmpty()) {
                         return CafeUtils.getResponseEntity("Item cannot be empty", HttpStatus.BAD_REQUEST);
                     }
-                    if (categoryDao.existsByName(requestMap.get("name"))) {
+                    // FIX P.2: case-insensitive duplicate prevention ("Drinks" vs "drinks" are the same category)
+                    if (categoryDao.existsByNameIgnoreCase(categoryName)) {
                         return CafeUtils.getResponseEntity("Item Already Exists", HttpStatus.BAD_REQUEST);
                     }
                     categoryDao.save(getCategoryFromMap(requestMap, false));
 //                    return CafeUtils.getResponseEntity("Category Added Successfully", HttpStatus.OK);
                     return ResponseEntity.ok("Category Added Successfully");
                 }
+                // FIX P.2: invalid payload previously fell through to 500 "Something Went Wrong"
+                return CafeUtils.getResponseEntity(CafeConstants.INVALID_DATA, HttpStatus.BAD_REQUEST);
             } else {
                 return CafeUtils.getResponseEntity(CafeConstants.UNAUTHOROZED_ACCESS, HttpStatus.UNAUTHORIZED);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("Category operation failed: {}", ex.getMessage());
         }
         return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -111,12 +113,19 @@ public class CategoryServiceImpl implements CategoryService {
             }
             return new ResponseEntity<>(categoryDao.findAll(), HttpStatus.OK);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("Category operation failed: {}", ex.getMessage());
         }
         return new ResponseEntity<List<Category>>(new ArrayList<>(), HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
 
+    /**
+     * FIX (found in E2E): findByIdWithLock uses a PESSIMISTIC_WRITE lock which REQUIRES an
+     * active transaction — without @Transactional the update failed with
+     * TransactionRequiredException ("no transaction is in progress"), i.e. category
+     * rename never worked via REST (unit tests mocked the DAO and missed it).
+     */
+    @Transactional
     @Override
     public ResponseEntity<String> updateCategory(Map<String, String> requestMap) {
         try {
@@ -128,10 +137,16 @@ public class CategoryServiceImpl implements CategoryService {
 //                    Optional optional = categoryDao.findById(Integer.parseInt(requestMap.get("id")));
                     Optional<Category> optional = categoryDao.findByIdWithLock(Integer.parseInt(requestMap.get("id")));
                       if(optional.isPresent()){ // or  if (!optional.isEmpty()) {
-                        /** If everything is correct, saves the updated category in the database
-                         after converting the request data into a proper category format using getCategoryFromMap(). */
-
-                        categoryDao.save(getCategoryFromMap(requestMap, true));
+                        // FIX P.3: mutate the LOCKED managed entity so the pessimistic lock and the
+                        // @Version field are actually honoured (the legacy code discarded the locked
+                        // entity and merged a detached new Category(id,name) with version=null).
+                        Category locked = optional.get();
+                        String newName = requestMap.get("name") == null ? locked.getName() : requestMap.get("name").trim();
+                        if (newName.isEmpty()) {
+                            return CafeUtils.getResponseEntity("Item cannot be empty", HttpStatus.BAD_REQUEST);
+                        }
+                        locked.setName(newName);
+                        categoryDao.save(locked);
                         return CafeUtils.getResponseEntity("Category Updated Successfully", HttpStatus.OK);
                     } else {
                         return CafeUtils.getResponseEntity("Category id doesn't exist", HttpStatus.BAD_REQUEST);
@@ -143,7 +158,7 @@ public class CategoryServiceImpl implements CategoryService {
                 return CafeUtils.getResponseEntity(CafeConstants.UNAUTHOROZED_ACCESS, HttpStatus.UNAUTHORIZED);
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("Category operation failed: {}", ex.getMessage());
         }
         return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
     }
