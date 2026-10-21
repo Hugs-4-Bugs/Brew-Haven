@@ -13,9 +13,11 @@ dashboard with real analytics.
 ```
 ├── src/                    # Spring Boot backend (com.inn.cafe: Rest/RestImpl/Service/ServiceImpl/
 │                           #   DAO/POJO/Wrapper/JWT/Utils/Config/Constents — original structure preserved)
-├── frontend/               # React + TypeScript SPA (Vite)
-├── scripts/sql/            # DB migration scripts for pre-existing databases
-├── docs/                   # Audit, deployment, security, backup, limitations, test evidence
+├── frontend/               # React + TypeScript SPA (Vite, dev port 3000)
+├── ops/                    # Verified one-command stack scripts (start/stop/status, E2E, DB integrity)
+├── scripts/sql/            # DB migrations + reference schema + demo seed
+├── docs/                   # Audit, deployment, security, backup, limitations, test evidence,
+│                           #   verification report + evidence, requirement document
 ├── ProductDetails*.xlsx    # Sample Excel import files
 └── .github/workflows/      # Backend CI (JDK17 + MySQL service) & Frontend CI
 ```
@@ -53,7 +55,7 @@ mysql CafeMgt < scripts/sql/V20261021_01__payment_mapping_fix.sql
 ```bash
 cd frontend
 npm install
-npm run dev                 # -> http://localhost:5173 (proxies API to :8000)
+npm run dev                 # -> http://localhost:3000 (proxies API to :8000; port in vite.config.ts)
 ```
 
 Production build: `npm run build` → `frontend/dist` (serve statically; see docs/DEPLOYMENT.md).
@@ -98,6 +100,10 @@ Full inventory incl. request/response shapes: [docs/audit/ENDPOINT_INVENTORY.md]
 | [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) | RPO/RTO, backup & tested-restore procedure |
 | [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) | Honest limitations of the current architecture |
 | [docs/TEST_EVIDENCE.md](docs/TEST_EVIDENCE.md) | Test results, E2E logs, final verification |
+| [docs/verification/STARTUP_VERIFICATION_REPORT.md](docs/verification/STARTUP_VERIFICATION_REPORT.md) | Full-stack startup/connectivity verification, public-preview E2E |
+| [docs/verification/evidence/](docs/verification/evidence/) | Screenshot evidence: E2E runs, repair proof, public-preview pass |
+| [docs/requirements/](docs/requirements/) | Original production requirement document |
+| [ops/](ops/) | Verified stack start/stop/status + E2E + DB-integrity scripts (env-driven) |
 
 ## Notes on this fork's fixes
 
