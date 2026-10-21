@@ -42,8 +42,8 @@ export default function UsersPage(): JSX.Element {
     <>
       <Card>
         <p className="muted" style={{ margin: 0 }}>
-          Accounts are created via sign-up with role <strong>user</strong> and require approval before
-          login. Disabling an account blocks sign-in immediately.
+          Accounts are created via sign-up with role <strong>user</strong> and are active
+          immediately. Disabling an account blocks sign-in immediately.
         </p>
       </Card>
 
@@ -52,7 +52,7 @@ export default function UsersPage(): JSX.Element {
           <LoadingState label="Loading users…" />
         ) : users.length === 0 ? (
           <Card>
-            <EmptyState ico="👥" title="No user accounts yet" hint="Signed-up users appear here for approval." />
+            <EmptyState ico="👥" title="No user accounts yet" hint="Signed-up users appear here automatically." />
           </Card>
         ) : (
           <div className="table-wrap">

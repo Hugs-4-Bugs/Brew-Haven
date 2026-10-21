@@ -112,7 +112,10 @@ public class UserServiceImpl implements UserService {
         user.setContactNumber(requestMap.get("contactNumber"));
         user.setEmail(requestMap.get("email"));
         user.setPassword(passwordEncoder.encode(requestMap.get("password"))); // passwordEncoder.encode will hash the password using the BCryptPasswordEncoder before saving in the database
-        user.setStatus("false");
+        // Normal customer accounts are ACTIVE immediately (status "true") so they can
+        // log in right after registration. Admins can still disable/re-enable any
+        // account via the existing Users page (userDao.updateStatus) — unchanged.
+        user.setStatus("true");
         user.setRole("user");
         return user;
     }

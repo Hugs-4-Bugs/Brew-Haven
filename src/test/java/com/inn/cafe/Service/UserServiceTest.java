@@ -10,6 +10,7 @@ import com.inn.cafe.Utils.EmailUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -152,6 +153,29 @@ class UserServiceTest {
 
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         assertTrue(response.getBody().contains("Unable to send email"));
+    }
+
+    @Test
+    void signUp_registersNormalUserActiveImmediately() {
+        // Registration default: a normal customer account is created ACTIVE
+        // (status "true", role "user") so login works right after sign-up.
+        // The admin disable/approve mechanism (updateStatus) is unaffected.
+        when(userDao.findByEmailId("new@cafe.local")).thenReturn(null);
+        when(passwordEncoder.encode("secret123")).thenReturn("$2a$10$encoded");
+        when(userDao.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ResponseEntity<String> response = userService.signUp(Map.of(
+                "name", "New Customer",
+                "contactNumber", "9876543210",
+                "email", "new@cafe.local",
+                "password", "secret123"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().contains("Registration Completed"));
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userDao).save(captor.capture());
+        assertEquals("true", captor.getValue().getStatus());  // active immediately
+        assertEquals("user", captor.getValue().getRole());    // normal user role
     }
 
     @Test

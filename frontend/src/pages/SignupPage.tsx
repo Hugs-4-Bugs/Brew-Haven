@@ -4,9 +4,9 @@ import * as api from '../api/cafe';
 import { Button } from '../components/ui';
 
 /**
- * Signup — creates a role="user" status="false" account per the backend contract.
- * After signup the account MUST be approved by an admin before login works
- * ("Wait for admin approval.") — this is communicated honestly here.
+ * Signup — creates a role="user" account. Normal customers are ACTIVE
+ * immediately after registration (backend sets status="true"); admins can
+ * still disable/re-enable accounts from the Users page.
  */
 export default function SignupPage(): JSX.Element {
   const navigate = useNavigate();
@@ -56,8 +56,8 @@ export default function SignupPage(): JSX.Element {
           <div className="auth-logo" aria-hidden="true">✅</div>
           <h1 className="auth-title">Registration completed</h1>
           <p className="auth-sub">
-            Your account was created and is now awaiting admin approval. You will be able to sign in
-            once an administrator approves your account.
+            Your account was created and is active. You can sign in immediately with the
+            email and password you just registered.
           </p>
           <Button variant="primary" onClick={() => navigate('/login')} style={{ width: '100%' }}>
             Back to sign in
@@ -72,7 +72,7 @@ export default function SignupPage(): JSX.Element {
       <div className="card auth-card">
         <div className="auth-logo" aria-hidden="true">☕</div>
         <h1 className="auth-title">Create an account</h1>
-        <p className="auth-sub">New accounts require admin approval before first login</p>
+        <p className="auth-sub">Create an account to sign in right away</p>
         <form onSubmit={onSubmit} noValidate>
           <div className="field">
             <label htmlFor="su-name">Full name</label>
