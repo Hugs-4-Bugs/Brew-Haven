@@ -15,6 +15,8 @@ import BillsPage from './pages/BillsPage';
 import ExcelImportPage from './pages/ExcelImportPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import NotFoundPage from './pages/NotFoundPage';
+import GuestHomePage from './pages/GuestHomePage';
+import MenuPage from './pages/MenuPage';
 
 function RequireAuth({ children, adminOnly = false }: { children: JSX.Element; adminOnly?: boolean }): JSX.Element {
   const { token, isAdmin } = useAuth();
@@ -32,19 +34,22 @@ export default function App(): JSX.Element {
   return (
     <AuthProvider>
       <Routes>
+        {/* ------------------------------------------------ public guest surface */}
+        <Route path="/" element={<GuestHomePage />} />
+        <Route path="/menu" element={<MenuPage />} />
+
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
+        {/* ------------------------------- authenticated app (unchanged routes) */}
         <Route
-          path="/"
           element={
             <ProtectedRoute>
               <Layout />
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
           <Route
             path="dashboard"
             element={

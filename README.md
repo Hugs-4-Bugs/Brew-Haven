@@ -87,6 +87,25 @@ Full inventory incl. request/response shapes: [docs/audit/ENDPOINT_INVENTORY.md]
 | Dashboard | `GET /dashboard/details` |
 | Payments | `POST /api/payment/process` `POST /api/payment/upi/verify` `POST /api/payment/upi/pay` `POST /api/payment/upi/qr-pay` `POST /api/payment/wallet/pay` `GET /api/payment/all` (admin) `GET /api/payment/{id}` (admin) `GET /api/payment/generate-qr/{upiId}/{amount}` |
 
+## Guest experience (public personalization)
+
+The frontend now ships a **public guest surface** — no login required:
+
+- `/` — guest homepage: first-visit preference onboarding (multi-select,
+  skippable), signature-dish carousel, personalized smart matches,
+  restaurant-selected favourites and a menu preview.
+- `/menu` — the full menu with category chips, preference-aware sorting and
+  an opt-in taste filter (always explains what is hidden; one click clears).
+
+Preferences live in a versioned, crash-safe localStorage record; `saved` and
+`skipped` are distinct states so guests are never trapped in onboarding.
+Recommendations are computed **only from real menu data** (dated snapshot for
+anonymous guests; live API when signed in) and never invent dishes, prices or
+health claims — health notes always yield a "confirm with staff / not medical
+advice" advisory. See
+[docs/verification/GUEST_PERSONALIZATION.md](docs/verification/GUEST_PERSONALIZATION.md)
+for the full behaviour contract, data sources and known limitations.
+
 ## Documentation index
 
 | Document | Contents |
@@ -101,6 +120,7 @@ Full inventory incl. request/response shapes: [docs/audit/ENDPOINT_INVENTORY.md]
 | [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) | Honest limitations of the current architecture |
 | [docs/TEST_EVIDENCE.md](docs/TEST_EVIDENCE.md) | Test results, E2E logs, final verification |
 | [docs/verification/STARTUP_VERIFICATION_REPORT.md](docs/verification/STARTUP_VERIFICATION_REPORT.md) | Full-stack startup/connectivity verification, public-preview E2E |
+| [docs/verification/GUEST_PERSONALIZATION.md](docs/verification/GUEST_PERSONALIZATION.md) | Guest personalization: onboarding, smart matches, carousel, data-grounding & limitations |
 | [docs/verification/evidence/](docs/verification/evidence/) | Screenshot evidence: E2E runs, repair proof, public-preview pass |
 | [docs/requirements/](docs/requirements/) | Original production requirement document |
 | [ops/](ops/) | Verified stack start/stop/status + E2E + DB-integrity scripts (env-driven) |
