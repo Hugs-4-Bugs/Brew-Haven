@@ -5,7 +5,12 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 3000,
+    // Platform preview gateway (preview-<bot-id>.space-z.ai) rewrites the Host
+    // header to the Alibaba FC runtime domain (*.fcapp.run) before reaching this
+    // dev server; without allowedHosts Vite answers 403 "Blocked request".
+    // Dot-prefix entries allow any subdomain of the two platform domains only.
+    allowedHosts: ['.fcapp.run', '.space-z.ai'],
     proxy: {
       // Dev proxy: same-origin API calls avoid CORS entirely in local development.
       // NOTE: keys use trailing slashes so SPA routes (/billing, /bills, /users,
