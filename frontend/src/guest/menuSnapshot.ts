@@ -51,6 +51,8 @@ export interface GuestMenuItem {
   tags: ItemTag[];
   /** Presentation metadata (frontend-curated, not backend data). */
   visual: { emoji: string; hue: number };
+  /** Admin-curated signature flag (live mode only; snapshot items lack it). */
+  featured?: boolean;
 }
 
 export interface MenuSource {
@@ -182,7 +184,7 @@ export async function resolveGuestMenu(): Promise<MenuSource> {
     for (const c of categories) catName.set(c.id, c.name);
     const items = products.map((p): GuestMenuItem => {
       const catId = p.categoryId ?? 0;
-      return makeItem(
+      const item = makeItem(
         p.id,
         p.name ?? 'Unnamed item',
         p.description ?? '',
@@ -191,6 +193,8 @@ export async function resolveGuestMenu(): Promise<MenuSource> {
         catName.get(catId) ?? 'Menu',
         p.status === 'false' ? 'false' : 'true',
       );
+      if (p.featured === true) item.featured = true; // admin-curated (additive field)
+      return item;
     });
     if (!items.length) return MENU_SNAPSHOT; // defensive: empty live menu → snapshot
     return { items, source: 'live' };

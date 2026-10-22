@@ -66,4 +66,12 @@ public class Bill implements Serializable {
     @Column(name = "createdby")   // The `createdBy` field records the user who generated the bill.
     private String createdBy;
 
+    /**
+     * ADDITIVE (revenue attribution): campaign code applied at checkout, if any.
+     * Nullable — existing rows and campaign-less orders keep NULL. Never
+     * interpreted by existing flows; only the campaign service reads it.
+     */
+    @Column(name = "campaign_code", length = 40)
+    private String campaignCode;
+
 }

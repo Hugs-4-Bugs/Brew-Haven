@@ -17,6 +17,11 @@ import ChangePasswordPage from './pages/ChangePasswordPage';
 import NotFoundPage from './pages/NotFoundPage';
 import GuestHomePage from './pages/GuestHomePage';
 import MenuPage from './pages/MenuPage';
+import MyOrdersPage from './pages/MyOrdersPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import CustomersPage from './pages/CustomersPage';
+import CampaignsPage from './pages/CampaignsPage';
+import AutomationPage from './pages/AutomationPage';
 
 function RequireAuth({ children, adminOnly = false }: { children: JSX.Element; adminOnly?: boolean }): JSX.Element {
   const { token, isAdmin } = useAuth();
@@ -38,6 +43,16 @@ export default function App(): JSX.Element {
         {/* ------------------------------------------------ public guest surface */}
         <Route path="/" element={<GuestHomePage />} />
         <Route path="/menu" element={<MenuPage />} />
+
+        {/* customer order history — any signed-in role */}
+        <Route
+          path="my-orders"
+          element={
+            <RequireAuth>
+              <MyOrdersPage />
+            </RequireAuth>
+          }
+        />
 
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
@@ -112,6 +127,38 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <ChangePasswordPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="analytics"
+            element={
+              <RequireAuth adminOnly>
+                <AnalyticsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="customers"
+            element={
+              <RequireAuth adminOnly>
+                <CustomersPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="campaigns"
+            element={
+              <RequireAuth adminOnly>
+                <CampaignsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="automation"
+            element={
+              <RequireAuth adminOnly>
+                <AutomationPage />
               </RequireAuth>
             }
           />

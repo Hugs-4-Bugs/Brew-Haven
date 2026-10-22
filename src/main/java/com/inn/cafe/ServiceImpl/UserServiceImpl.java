@@ -249,6 +249,39 @@ public class UserServiceImpl implements UserService {
     }
 
 
+    /**
+     * ADDITIVE: own-profile read for the signed-in account. Used by the customer
+     * checkout to pre-fill name/contact. Returns ONLY the caller's own fields.
+     */
+    @Override
+    public ResponseEntity<String> getMyProfile() {
+        try {
+            String email = jwtFilter.getCurrentUser();
+            if (email == null) {
+                return CafeUtils.getResponseEntity("Unauthorized Access", HttpStatus.UNAUTHORIZED);
+            }
+            User user = userDao.findByEmailId(email);
+            if (user == null) {
+                return CafeUtils.getResponseEntity("Account not found", HttpStatus.NOT_FOUND);
+            }
+            StringBuilder sb = new StringBuilder("{");
+            sb.append("\"name\":").append(jsonString(user.getName()));
+            sb.append(",\"email\":").append(jsonString(user.getEmail()));
+            sb.append(",\"contactNumber\":").append(jsonString(user.getContactNumber()));
+            sb.append(",\"role\":").append(jsonString(user.getRole()));
+            sb.append("}");
+            return new ResponseEntity<String>(sb.toString(), HttpStatus.OK);
+        } catch (Exception ex) {
+            log.error("getMyProfile failed: {}", ex.getMessage());
+        }
+        return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    private static String jsonString(String value) {
+        if (value == null) return "\"\"";
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
 // method to check the token for validation whether api is being accessed by user or admin. if you try to hit the api with invalid token then it will return 403(insufficient permission), if token is validated it will return 200 status code
     @Override
     public ResponseEntity<String> checkToken() {

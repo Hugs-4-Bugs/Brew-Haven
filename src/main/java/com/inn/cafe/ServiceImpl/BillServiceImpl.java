@@ -61,6 +61,10 @@ public class BillServiceImpl implements BillService {
     @Autowired
     BillDao billDao;
 
+    /** Revenue attribution: records the server-verified CONVERTED campaign event. */
+    @Autowired
+    com.inn.cafe.ServiceImpl.CampaignServiceImpl campaignServiceImpl;
+
     @Value("${cafe.bill.store-location:./Bill Document}")
     private String storeLocation;
 
@@ -90,7 +94,20 @@ public class BillServiceImpl implements BillService {
 
             // FIX B.2 ordering: write the PDF first; only persist the bill once the file exists.
             writePdf(fileName, requestMap, jsonArray);
-            insertBill(requestMap);
+            Bill saved = insertBill(requestMap);
+
+            // Revenue attribution (additive): if the customer applied a campaign
+            // code at checkout, validate it server-side and record the CONVERTED
+            // event with the bill id + total. Failures NEVER block the order.
+            Object campaignCode = requestMap.get("campaignCode");
+            if (campaignCode != null && saved != null && saved.getId() != null) {
+                try {
+                    campaignServiceImpl.attributeConversion(String.valueOf(campaignCode),
+                            saved.getId(), saved.getTotal(), new StringBuilder());
+                } catch (Exception attrEx) {
+                    log.warn("Campaign attribution skipped: {}", attrEx.getMessage());
+                }
+            }
 
             return new ResponseEntity<>("{\"uuid\":\"" + fileName + "\"}", HttpStatus.OK);
         } catch (Exception ex) {
@@ -182,8 +199,9 @@ public class BillServiceImpl implements BillService {
         document.add(rectangle);
     }
 
-    /** FIX B.2: exceptions propagate — the caller only reaches insertBill if this succeeds. */
-    private void insertBill(Map<String, Object> requestMap) {
+    /** FIX B.2: exceptions propagate — the caller only reaches insertBill if this succeeds.
+     * Returns the PERSISTED bill (with id) so callers can reference it (campaign attribution). */
+    private Bill insertBill(Map<String, Object> requestMap) {
         Bill bill = new Bill();
         bill.setUuid((String) requestMap.get("uuid"));
         bill.setName((String) requestMap.get("name"));
@@ -193,7 +211,12 @@ public class BillServiceImpl implements BillService {
         bill.setTotal(Double.valueOf(String.valueOf(requestMap.get("totalAmount"))).intValue());
         bill.setProductDetails((String) requestMap.get("productDetails"));
         bill.setCreatedBy(jwtFilter.getCurrentUser());
-        billDao.save(bill);
+        // ADDITIVE: campaign code applied at checkout (null when absent — legacy behavior).
+        Object campaignCode = requestMap.get("campaignCode");
+        if (campaignCode != null && !String.valueOf(campaignCode).trim().isEmpty()) {
+            bill.setCampaignCode(String.valueOf(campaignCode).trim());
+        }
+        return billDao.save(bill);
     }
 
     private boolean validateRequestMap(Map<String, Object> requestMap) {
@@ -218,6 +241,28 @@ public class BillServiceImpl implements BillService {
             return new ResponseEntity<>(list, HttpStatus.OK);
         } catch (Exception ex) {
             log.error("getBills failed: {}", ex.getMessage());
+        }
+        return new ResponseEntity<>(new java.util.ArrayList<>(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    /**
+     * ADDITIVE endpoint backing (/bill/myBills): the signed-in customer's OWN
+     * orders only (email == current user). Admins continue to use /bill/getBills.
+     */
+    @Override
+    public ResponseEntity<List<Bill>> getMyBills() {
+        log.info("Inside getMyBills");
+        try {
+            String email = jwtFilter.getCurrentUser();
+            List<Bill> list = email == null
+                    ? new java.util.ArrayList<>()
+                    : billDao.findAll().stream()
+                        .filter(b -> email.equalsIgnoreCase(b.getEmail()))
+                        .sorted((a, b) -> Integer.compare(b.getId(), a.getId()))
+                        .collect(java.util.stream.Collectors.toList());
+            return new ResponseEntity<>(list, HttpStatus.OK);
+        } catch (Exception ex) {
+            log.error("getMyBills failed: {}", ex.getMessage());
         }
         return new ResponseEntity<>(new java.util.ArrayList<>(), HttpStatus.INTERNAL_SERVER_ERROR);
     }

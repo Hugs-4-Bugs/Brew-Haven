@@ -12,7 +12,7 @@
  *  - Saving/clearing updates the page instantly (storage event), no reload.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import GuestNav from '../components/guest/GuestNav';
 import PreferenceModal from '../components/guest/PreferenceModal';
@@ -29,6 +29,8 @@ import {
 import { resolveGuestMenu, type MenuSource } from '../guest/menuSnapshot';
 import { POPULAR_ITEM_IDS, resolveFeatured, SIGNATURE_ITEM_IDS } from '../guest/featured';
 import { pairingsFor } from '../guest/pairings';
+import CampaignBanner from '../components/guest/CampaignBanner';
+import { hydratePreferencesFromServer, syncPreferencesToServer } from '../guest/serverPrefs';
 import type { GuestPrefRecord } from '../guest/types';
 
 export default function GuestHomePage(): JSX.Element {
@@ -37,6 +39,7 @@ export default function GuestHomePage(): JSX.Element {
   const [checkedStorage, setCheckedStorage] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'onboarding' | 'edit'>('onboarding');
+  const timerRef = useRef<number | null>(null);
 
   // Initial load: storage record + real menu data.
   useEffect(() => {
@@ -45,8 +48,17 @@ export default function GuestHomePage(): JSX.Element {
     setCheckedStorage(true);
     // First eligible visit only: no record (neither saved nor skipped).
     if (!rec) {
-      const t = window.setTimeout(() => setModalOpen(true), 500);
-      return () => window.clearTimeout(t);
+      // Signed-in customers may have preferences on their account — adopt them
+      // before deciding this is a first visit (no re-prompt for known guests).
+      void hydratePreferencesFromServer().then(() => {
+        const adopted = loadGuestPrefRecord();
+        setRecord(adopted);
+        if (!adopted) {
+          const t = window.setTimeout(() => setModalOpen(true), 500);
+          timerRef.current = t;
+        }
+      });
+      return () => { if (timerRef.current != null) window.clearTimeout(timerRef.current); };
     }
   }, []);
 
@@ -76,6 +88,7 @@ export default function GuestHomePage(): JSX.Element {
   const handleSave = useCallback((prefs: Parameters<typeof savePreferences>[0]) => {
     savePreferences(prefs);
     setModalOpen(false);
+    void syncPreferencesToServer(); // account copy for signed-in customers
   }, []);
 
   const handleDismiss = useCallback(() => {
@@ -91,7 +104,13 @@ export default function GuestHomePage(): JSX.Element {
 
   const savedPrefs = record?.status === 'saved' ? record.preferences : null;
 
-  const featured = useMemo(() => resolveFeatured(menu.items, SIGNATURE_ITEM_IDS), [menu.items]);
+  // Signature carousel: admin-curated featured products (live mode) when any
+  // exist, otherwise the documented frontend configuration.
+  const featuredIds = useMemo(() => {
+    const live = menu.items.filter((i) => i.featured).map((i) => i.id);
+    return live.length > 0 ? live : SIGNATURE_ITEM_IDS;
+  }, [menu.items]);
+  const featured = useMemo(() => resolveFeatured(menu.items, featuredIds), [menu.items, featuredIds]);
   const popular = useMemo(() => resolveFeatured(menu.items, POPULAR_ITEM_IDS), [menu.items]);
   const previewItems = useMemo(() => menu.items.filter((i) => i.status === 'true').slice(0, 6), [menu.items]);
 
@@ -108,6 +127,8 @@ export default function GuestHomePage(): JSX.Element {
   return (
     <div className="guest-page">
       <GuestNav onEditPreferences={openPreferences} prefRecord={record} />
+
+      <CampaignBanner />
 
       <PreferenceModal
         open={modalOpen}

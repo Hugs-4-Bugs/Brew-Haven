@@ -23,6 +23,9 @@ public class ProductWrapper {
 
     String categoryName;
 
+    /** Admin-curated signature/featured flag (null = not featured). ADDITIVE. */
+    Boolean featured;
+
     // default constructor
     public ProductWrapper(){
 
@@ -37,6 +40,19 @@ public class ProductWrapper {
         this.status = status;
         this.categoryId = categoryId;
         this.categoryName = categoryName;
+    }
+
+    // ADDITIVE constructor for getAllProduct incl. the admin-curated featured flag
+    // (JSON gains ONE optional field — backward compatible for existing consumers).
+    public ProductWrapper(Integer id, String name, String description, Integer price, String status, Integer categoryId, String categoryName, Boolean featured) {
+        this.id = id;
+        this.name = name;
+        this.description = description;
+        this.price = price;
+        this.status = status;
+        this.categoryId = categoryId;
+        this.categoryName = categoryName;
+        this.featured = featured;
     }
 
     // constructor for getProductByCategory

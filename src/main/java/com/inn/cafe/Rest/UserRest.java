@@ -30,6 +30,10 @@ public interface UserRest {
     @GetMapping(path = "/checkToken")
     ResponseEntity<String> checkToken();
 
+    // ADDITIVE: the signed-in account's own profile (name/email/contact/role).
+    @GetMapping(path = "/me")
+    ResponseEntity<String> getMyProfile();
+
 
     // api to change/update the password when the user is logged in and knows the current password
     @PostMapping(path = "/changePassword")

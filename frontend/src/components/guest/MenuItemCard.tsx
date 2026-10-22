@@ -10,11 +10,12 @@
  * NEVER claims allergen safety it cannot prove.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { GuestMenuItem } from '../../guest/menuSnapshot';
 import type { PairingSuggestion } from '../../guest/pairings';
 import { formatMoney } from '../../utils/format';
+import { recordEvent } from '../../api/revenue';
 
 interface MenuItemCardProps {
   item: GuestMenuItem;
@@ -22,6 +23,8 @@ interface MenuItemCardProps {
   matchReasons?: string[];
   highlight?: boolean;
   onHighlightSeen?: () => void;
+  /** Cart hook: adds this item (or a pairing, with viaUpsell=true). */
+  onAdd?: (item: GuestMenuItem, viaUpsell?: boolean) => void;
 }
 
 const VERIFIED_TAG_LABELS: Record<string, string> = {
@@ -38,9 +41,19 @@ const ADVISORY_TAG_LABELS: Record<string, string> = {
   gluten: 'Gluten — confirm with staff',
 };
 
-export default function MenuItemCard({ item, pairings = [], matchReasons, highlight, onHighlightSeen }: MenuItemCardProps): JSX.Element {
+export default function MenuItemCard({ item, pairings = [], matchReasons, highlight, onHighlightSeen, onAdd }: MenuItemCardProps): JSX.Element {
   const [pairingDismissed, setPairingDismissed] = useState(false);
+  const upsellReported = useRef(false);
   const available = item.status === 'true';
+
+  // Upsell measurement (fire-and-forget, signed-in sessions only): the pairing
+  // suggestion being VISIBLE is itself the event we measure.
+  useEffect(() => {
+    if (pairings.length > 0 && !pairingDismissed && !upsellReported.current) {
+      upsellReported.current = true;
+      void recordEvent('UPSELL_SHOWN', item.id, 'pairing suggestion displayed');
+    }
+  }, [pairings.length, pairingDismissed, item.id]);
   const verifiedTags = item.tags.filter((t) => t.verified && VERIFIED_TAG_LABELS[t.kind]);
   const advisoryTags = item.tags.filter((t) => !t.verified && ADVISORY_TAG_LABELS[t.kind]);
 
@@ -89,14 +102,37 @@ export default function MenuItemCard({ item, pairings = [], matchReasons, highli
                 </span>
               ))}
             </span>
+            {onAdd && pairings[0] && (
+              <button
+                type="button"
+                className="mic-pairing-add"
+                aria-label={`Add pairing ${pairings[0].item.name} to the cart`}
+                onClick={() => onAdd(pairings[0].item, true)}
+              >
+                + Add
+              </button>
+            )}
             <button type="button" className="mic-pairing-close" aria-label="Dismiss pairing suggestion" onClick={() => setPairingDismissed(true)}>
               ✕
             </button>
           </div>
         )}
-        <Link to={`/menu?item=${item.id}`} className="mic-view" aria-label={`View ${item.name} in the full menu`}>
-          View in menu →
-        </Link>
+        <div className="mic-actions-row">
+          {onAdd ? (
+            available ? (
+              <button type="button" className="btn btn-primary mic-add" onClick={() => onAdd(item)}>
+                + Add to cart
+              </button>
+            ) : (
+              <span className="mic-add mic-add-unavailable">Unavailable</span>
+            )
+          ) : (
+            <span />
+          )}
+          <Link to={`/menu?item=${item.id}`} className="mic-view" aria-label={`View ${item.name} in the full menu`}>
+            View in menu →
+          </Link>
+        </div>
       </div>
     </article>
   );

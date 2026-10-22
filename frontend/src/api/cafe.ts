@@ -25,6 +25,8 @@ export interface ProductWrapper {
   status?: string; // "true" | "false"
   categoryId?: number;
   categoryName?: string;
+  /** Admin-curated signature flag (additive; null/undefined = not featured). */
+  featured?: boolean | null;
 }
 
 export interface Bill {

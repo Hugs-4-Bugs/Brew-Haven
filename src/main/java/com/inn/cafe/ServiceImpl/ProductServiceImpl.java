@@ -208,8 +208,39 @@ public class ProductServiceImpl implements ProductService {
     }
 
 
-    // Method to update the product status
+    // Method to update the product status  (updateStatus follows below)
+    /**
+     * ADDITIVE (admin-only): set/clear the featured (signature) flag. Uses save()
+     * on the full entity so the flag co-exists with all existing columns;
+     * existing rows' NULL becomes an explicit value ONLY when an admin acts.
+     */
     @Transactional
+    @Override
+    public ResponseEntity<String> setFeatured(Map<String, String> requestMap) {
+        try {
+            if (jwtFilter.isAdmin()) {
+                String id = requestMap.get("id");
+                String featured = requestMap.get("featured");
+                if (id == null || featured == null || (!"true".equalsIgnoreCase(featured) && !"false".equalsIgnoreCase(featured))) {
+                    return CafeUtils.getResponseEntity(CafeConstants.INVALID_DATA, HttpStatus.BAD_REQUEST);
+                }
+                Optional<Product> optional = productDao.findById(Integer.parseInt(id));
+                if (optional.isEmpty()) {
+                    return CafeUtils.getResponseEntity("Product id doesn't exists", HttpStatus.OK);
+                }
+                Product product = optional.get();
+                product.setFeatured(Boolean.parseBoolean(featured));
+                productDao.save(product);
+                return CafeUtils.getResponseEntity("Featured status updated successfully", HttpStatus.OK);
+            } else {
+                return CafeUtils.getResponseEntity(CafeConstants.UNAUTHOROZED_ACCESS, HttpStatus.UNAUTHORIZED);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     @Override
     public ResponseEntity<String> updateStatus(Map<String, String> requestMap) {
         try {

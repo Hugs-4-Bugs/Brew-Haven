@@ -22,6 +22,13 @@ export default defineConfig({
       '/category/': { target: 'http://localhost:8000', changeOrigin: true },
       '/bill/': { target: 'http://localhost:8000', changeOrigin: true },
       '/dashboard/': { target: 'http://localhost:8000', changeOrigin: true },
+      // Revenue-platform backend routes (additive, same trailing-slash convention).
+      '/campaign/': { target: 'http://localhost:8000', changeOrigin: true },
+      '/analytics/': { target: 'http://localhost:8000', changeOrigin: true },
+      '/customer/': { target: 'http://localhost:8000', changeOrigin: true },
+      '/feedback/': { target: 'http://localhost:8000', changeOrigin: true },
+      '/events/': { target: 'http://localhost:8000', changeOrigin: true },
+      '/automation/': { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
   build: {

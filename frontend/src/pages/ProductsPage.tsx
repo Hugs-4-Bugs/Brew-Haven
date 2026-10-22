@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import * as api from '../api/cafe';
+import { setProductFeatured } from '../api/revenue';
 import { useAuth } from '../auth/useAuth';
 import { Button, Card, EmptyState, ErrorState, LoadingState, Modal, useEntrance, useToasts, ToastStack } from '../components/ui';
 import { statusLabel } from '../utils/format';
@@ -100,6 +101,16 @@ export default function ProductsPage(): JSX.Element {
     }
   };
 
+  const toggleFeatured = async (p: api.ProductWrapper): Promise<void> => {
+    try {
+      const message = await setProductFeatured(p.id, p.featured !== true);
+      push('ok', message);
+      await load();
+    } catch (err) {
+      push('err', err instanceof Error ? err.message : 'Featured update failed.');
+    }
+  };
+
   const toggleStatus = async (p: api.ProductWrapper): Promise<void> => {
     try {
       const next = p.status === 'true' ? 'false' : 'true';
@@ -188,6 +199,7 @@ export default function ProductsPage(): JSX.Element {
                   <tr key={p.id}>
                     <td>
                       <strong>{p.name}</strong>
+                      {p.featured === true && <span title="Signature / featured"> ⭐</span>}
                       {p.description && <div className="muted">{p.description}</div>}
                     </td>
                     <td>{p.categoryName ?? '—'}</td>
@@ -203,6 +215,15 @@ export default function ProductsPage(): JSX.Element {
                           <Button size="sm" onClick={() => openEdit(p)}>Edit</Button>
                           <Button size="sm" variant="ghost" onClick={() => void toggleStatus(p)}>
                             {p.status === 'true' ? 'Mark unavailable' : 'Mark available'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={p.featured === true ? `Remove ${p.name} from signature` : `Mark ${p.name} as signature`}
+                            title={p.featured === true ? 'Signature — click to remove' : 'Mark as signature (featured in the guest carousel)'}
+                            onClick={() => void toggleFeatured(p)}
+                          >
+                            {p.featured === true ? '⭐ Signature' : '☆ Feature'}
                           </Button>
                           <Button size="sm" variant="danger" onClick={() => setConfirmDelete(p)}>Delete</Button>
                         </div>

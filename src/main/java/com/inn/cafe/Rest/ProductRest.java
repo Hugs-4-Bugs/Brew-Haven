@@ -32,6 +32,10 @@ public interface ProductRest {
     @PostMapping(path = "/updateStatus")
     ResponseEntity<String> updateStatus(@RequestBody Map<String, String> requestMap);
 
+    // ADDITIVE (admin-only): set/clear the featured (signature) merchandising flag.
+    @PostMapping(path = "/setFeatured")
+    ResponseEntity<String> setFeatured(@RequestBody Map<String, String> requestMap);
+
     // API to get products by category
     @GetMapping(path = "/getByCategory/{id}")
     ResponseEntity<List<ProductWrapper>> getByCategory(@PathVariable Integer id);

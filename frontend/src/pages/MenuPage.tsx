@@ -14,10 +14,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import GuestNav from '../components/guest/GuestNav';
 import MenuItemCard from '../components/guest/MenuItemCard';
+import CampaignBanner from '../components/guest/CampaignBanner';
+import CheckoutDrawer from '../components/guest/CheckoutDrawer';
 import { loadGuestPrefRecord, PREFS_EVENT } from '../guest/preferenceStore';
+import { hydratePreferencesFromServer, syncPreferencesToServer } from '../guest/serverPrefs';
 import { resolveGuestMenu, type GuestMenuItem, type MenuSource } from '../guest/menuSnapshot';
 import { recommendItems } from '../guest/recommendations';
 import { pairingsFor } from '../guest/pairings';
+import { CART_EVENT, addToCart, cartCount, cartTotal, getCart, type CartLine } from '../guest/cartStore';
+import type { ActiveCampaign } from '../api/revenue';
+import { formatMoney } from '../utils/format';
 import type { GuestPrefRecord } from '../guest/types';
 
 export default function MenuPage(): JSX.Element {
@@ -29,18 +35,29 @@ export default function MenuPage(): JSX.Element {
   const [params, setParams] = useSearchParams();
   const highlightId = params.get('item') ? Number(params.get('item')) : null;
   const gridRef = useRef<HTMLDivElement>(null);
+  const [cart, setCart] = useState<CartLine[]>(getCart());
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [appliedCampaign, setAppliedCampaign] = useState<ActiveCampaign | null>(null);
 
   useEffect(() => {
     setRecord(loadGuestPrefRecord());
+    // Signed-in customers: adopt account preferences when the device has none.
+    void hydratePreferencesFromServer().then(() => setRecord(loadGuestPrefRecord()));
     let cancelled = false;
     resolveGuestMenu().then((m) => {
       if (!cancelled) setMenu(m);
     });
-    const onChange = () => setRecord(loadGuestPrefRecord());
+    const onChange = () => {
+      setRecord(loadGuestPrefRecord());
+      void syncPreferencesToServer();
+    };
     window.addEventListener(PREFS_EVENT, onChange);
+    const onCart = () => setCart(getCart());
+    window.addEventListener(CART_EVENT, onCart);
     return () => {
       cancelled = true;
       window.removeEventListener(PREFS_EVENT, onChange);
+      window.removeEventListener(CART_EVENT, onCart);
     };
   }, []);
 
@@ -113,11 +130,16 @@ export default function MenuPage(): JSX.Element {
     setParams(next, { replace: true });
   };
 
+  const handleAdd = (item: GuestMenuItem, viaUpsell = false) => {
+    addToCart(item, 1, viaUpsell);
+  };
+
   return (
     <div className="guest-page">
       <GuestNav onEditPreferences={openPreferences} prefRecord={record} />
 
       <main className="menu-page-main">
+        <CampaignBanner onApply={(c) => { setAppliedCampaign(c); setCheckoutOpen(false); }} />
         <header className="menu-header">
           <div>
             <span className="guest-eyebrow">Brew Haven</span>
@@ -200,6 +222,7 @@ export default function MenuPage(): JSX.Element {
               matchReasons={matchMap?.get(item.id)}
               highlight={highlightId === item.id}
               onHighlightSeen={sawHighlight}
+              onAdd={handleAdd}
             />
           ))}
         </div>
@@ -211,6 +234,26 @@ export default function MenuPage(): JSX.Element {
           </p>
         )}
       </main>
+
+      {cart.length > 0 && !checkoutOpen && (
+        <div className="cart-bar" role="region" aria-label="Cart summary">
+          <span className="cart-bar-count">
+            🛒 {cartCount(cart)} item{cartCount(cart) === 1 ? '' : 's'}
+          </span>
+          <span className="cart-bar-total">{formatMoney(cartTotal(cart))}</span>
+          <button type="button" className="btn btn-primary" onClick={() => setCheckoutOpen(true)}>
+            Checkout →
+          </button>
+        </div>
+      )}
+
+      <CheckoutDrawer
+        open={checkoutOpen}
+        onClose={() => setCheckoutOpen(false)}
+        lines={cart}
+        appliedCampaign={appliedCampaign}
+        onClearCampaign={() => setAppliedCampaign(null)}
+      />
 
       <footer className="guest-footer">
         <div className="guest-footer-inner">

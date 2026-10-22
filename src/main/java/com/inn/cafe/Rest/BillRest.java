@@ -30,4 +30,8 @@ public interface BillRest {
     // API to delete the bill
     @PostMapping(path = "/delete/{id}")
     ResponseEntity<String> deleteBill(@PathVariable Integer id);
+
+    // ADDITIVE: the signed-in customer's own orders (own email only).
+    @GetMapping(path = "/myBills")
+    ResponseEntity<List<Bill>> getMyBills();
 }

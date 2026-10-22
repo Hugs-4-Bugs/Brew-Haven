@@ -20,6 +20,9 @@ public interface UserService {
 
     ResponseEntity<String> changePassword(Map<String, String> requestMap);  // to change the password
 
+    // ADDITIVE: the signed-in account's own profile (name/email/contact/role).
+    ResponseEntity<String> getMyProfile();
+
 
     // method for FORGET PASSWORD using @RequestBody 👇👇👇👇👇
     ResponseEntity<String> forgotPassword(Map<String, String> requestMap);

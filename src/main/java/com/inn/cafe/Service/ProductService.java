@@ -24,6 +24,9 @@ public interface ProductService {
 
     ResponseEntity<String> updateStatus(Map<String, String> requestMap);
 
+    // ADDITIVE (admin-only): mark/unmark a product as featured (signature merchandising).
+    ResponseEntity<String> setFeatured(Map<String, String> requestMap);
+
     ResponseEntity<List<ProductWrapper>> getByCategory(Integer id);
 
     ResponseEntity<ProductWrapper> getProductById(Integer id);

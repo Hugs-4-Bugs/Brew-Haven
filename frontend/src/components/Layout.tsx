@@ -21,6 +21,7 @@ interface NavItem {
 const NAV_CUSTOMER: NavItem[] = [
   { to: '/', label: 'Home', ico: '🏠', end: true },
   { to: '/menu', label: 'Browse Menu', ico: '📖' },
+  { to: '/my-orders', label: 'My Orders', ico: '🛍️' },
 ];
 
 const NAV_MAIN: NavItem[] = [
@@ -34,6 +35,13 @@ const NAV_MANAGE: NavItem[] = [
   { to: '/categories', label: 'Categories', ico: '🏷️', adminOnly: true },
   { to: '/users', label: 'Users', ico: '👥', adminOnly: true },
   { to: '/excel-import', label: 'Excel Import', ico: '📥', adminOnly: true },
+  { to: '/customers', label: 'Customers', ico: '🤝', adminOnly: true },
+  { to: '/campaigns', label: 'Campaigns', ico: '📣', adminOnly: true },
+  { to: '/automation', label: 'Automation', ico: '⚙️', adminOnly: true },
+];
+
+const NAV_INTELLIGENCE: NavItem[] = [
+  { to: '/analytics', label: 'Revenue Intelligence', ico: '📈', adminOnly: true },
 ];
 
 const NAV_ACCOUNT: NavItem[] = [{ to: '/change-password', label: 'Change Password', ico: '🔑' }];
@@ -47,6 +55,10 @@ const TITLES: Record<string, string> = {
   '/users': 'User Administration',
   '/excel-import': 'Excel Import',
   '/change-password': 'Change Password',
+  '/analytics': 'Revenue Intelligence',
+  '/customers': 'Customers',
+  '/campaigns': 'Campaigns',
+  '/automation': 'Automation',
 };
 
 export default function Layout(): JSX.Element {
@@ -86,6 +98,7 @@ export default function Layout(): JSX.Element {
         <nav aria-label="Main navigation">
           {renderSection('Customer view', NAV_CUSTOMER)}
           {renderSection('Operations', NAV_MAIN)}
+          {renderSection('Intelligence', NAV_INTELLIGENCE)}
           {renderSection('Manage', NAV_MANAGE)}
           {renderSection('Account', NAV_ACCOUNT)}
         </nav>

@@ -48,9 +48,14 @@ export default function GuestNav({ onEditPreferences, prefRecord }: GuestNavProp
                 Open dashboard
               </Link>
             ) : (
-              <Link to="/change-password" className="btn btn-outline gnav-cta">
-                My account
-              </Link>
+              <>
+                <Link to="/my-orders" className="btn btn-outline gnav-cta">
+                  My orders
+                </Link>
+                <Link to="/change-password" className="btn btn-outline gnav-cta">
+                  My account
+                </Link>
+              </>
             )
           ) : (
             <>

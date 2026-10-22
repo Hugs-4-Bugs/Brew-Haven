@@ -83,6 +83,11 @@ public class ProductRestImpl implements ProductRest {
     }
 
     @Override
+    public ResponseEntity<String> setFeatured(Map<String, String> requestMap) {
+        return productService.setFeatured(requestMap);
+    }
+
+    @Override
     public ResponseEntity<String> updateStatus(Map<String, String> requestMap) {
         try {
             return productService.updateStatus(requestMap);

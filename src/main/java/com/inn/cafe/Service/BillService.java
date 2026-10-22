@@ -14,6 +14,9 @@ public interface BillService {
 
     ResponseEntity<List<Bill>> getBills();
 
+    // ADDITIVE: the signed-in customer's own orders (email == current user).
+    ResponseEntity<List<Bill>> getMyBills();
+
     ResponseEntity<byte[]> getPdf(Map<String, Object> requestMap);
 
 

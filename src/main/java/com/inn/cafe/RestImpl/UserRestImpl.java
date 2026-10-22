@@ -38,6 +38,16 @@ public class UserRestImpl implements UserRest {
     @Autowired  // by autowiring UserService we'll be able to access all the methods available in userService
     private UserService userService;
 
+    @Override
+    public ResponseEntity<String> getMyProfile() {
+        try {
+            return userService.getMyProfile();
+        } catch (Exception ex) {
+            log.error("Exception in getMyProfile: ", ex);
+        }
+        return CafeUtils.getResponseEntity(CafeConstants.SOMETHING_WENT_WRONG, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
 
     @Override
     public ResponseEntity<String> signUp(Map<String, String> requestMap) {
