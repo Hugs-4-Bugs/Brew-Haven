@@ -4,6 +4,7 @@ import com.inn.cafe.Constents.CafeConstants;
 import com.inn.cafe.DAO.BillDao;
 import com.inn.cafe.JWT.JwtFilter;
 import com.inn.cafe.POJO.Bill;
+import com.inn.cafe.POJO.PaymentIntent;
 import com.inn.cafe.Service.BillService;
 import com.inn.cafe.Utils.CafeUtils;
 import com.itextpdf.text.*;
@@ -202,6 +203,12 @@ public class BillServiceImpl implements BillService {
     /** FIX B.2: exceptions propagate — the caller only reaches insertBill if this succeeds.
      * Returns the PERSISTED bill (with id) so callers can reference it (campaign attribution). */
     private Bill insertBill(Map<String, Object> requestMap) {
+        return insertBill(requestMap, jwtFilter.getCurrentUser());
+    }
+
+    /** Overload with an explicit createdBy — the checkout webhook has no JWT context,
+     *  so bills created from settled intents attribute to the intent owner. */
+    private Bill insertBill(Map<String, Object> requestMap, String createdBy) {
         Bill bill = new Bill();
         bill.setUuid((String) requestMap.get("uuid"));
         bill.setName((String) requestMap.get("name"));
@@ -210,7 +217,7 @@ public class BillServiceImpl implements BillService {
         bill.setPaymentMethod((String) requestMap.get("paymentMethod"));
         bill.setTotal(Double.valueOf(String.valueOf(requestMap.get("totalAmount"))).intValue());
         bill.setProductDetails((String) requestMap.get("productDetails"));
-        bill.setCreatedBy(jwtFilter.getCurrentUser());
+        bill.setCreatedBy(createdBy);
         // ADDITIVE: campaign code applied at checkout (null when absent — legacy behavior).
         Object campaignCode = requestMap.get("campaignCode");
         if (campaignCode != null && !String.valueOf(campaignCode).trim().isEmpty()) {
@@ -304,6 +311,60 @@ public class BillServiceImpl implements BillService {
         try (InputStream targetStream = new FileInputStream(initialFile)) {
             return IOUtils.toByteArray(targetStream);
         }
+    }
+
+    /** ADDITIVE: plain lookup for checkout receipt/status builders. */
+    @Override
+    public Bill getBillById(Integer id) {
+        if (id == null) {
+            return null;
+        }
+        Optional<Bill> bill = billDao.findById(id);
+        return bill.orElse(null);
+    }
+
+    /**
+     * ADDITIVE: bill creation from a SETTLED payment intent.
+     *
+     * Every figure comes from the server-computed intent snapshot (which the
+     * pricing engine produced from live DB prices): total, productDetails
+     * (with verified prices) and the single coupon code. createdBy is the
+     * intent owner (webhook calls have no JWT context). Reuses the exact
+     * writePdf + insertBill internals as the legacy generateReport flow.
+     */
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public Bill createBillFromIntent(PaymentIntent intent) {
+        if (intent.getBillId() != null) {
+            return billDao.findById(intent.getBillId()).orElse(null);
+        }
+        Map<String, Object> requestMap = new java.util.HashMap<>();
+        String uuid = CafeUtils.getUUID();
+        requestMap.put("uuid", uuid);
+        requestMap.put("name", intent.getCustomerName());
+        requestMap.put("email", intent.getEmail());
+        requestMap.put("contactNumber", intent.getContactNumber());
+        requestMap.put("paymentMethod", intent.getMethod());
+        requestMap.put("totalAmount", intent.getTotal());
+        requestMap.put("productDetails", intent.getItemsJson());
+        if (intent.getCouponCode() != null && !intent.getCouponCode().trim().isEmpty()) {
+            requestMap.put("campaignCode", intent.getCouponCode().trim());
+        }
+        try {
+            writePdf(uuid, requestMap, CafeUtils.getJsonArrayFromString(intent.getItemsJson()));
+        } catch (Exception e) {
+            throw new IllegalStateException("Bill PDF generation failed: " + e.getMessage(), e);
+        }
+        Bill saved = insertBill(requestMap, intent.getUserId());
+        if (saved != null && saved.getId() != null && intent.getCouponCode() != null) {
+            try {
+                campaignServiceImpl.attributeConversion(intent.getCouponCode(), saved.getId(),
+                        saved.getTotal(), new StringBuilder());
+            } catch (Exception attrEx) {
+                log.warn("Campaign attribution skipped: {}", attrEx.getMessage());
+            }
+        }
+        return saved;
     }
 
     @Override

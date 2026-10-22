@@ -20,7 +20,7 @@ export default function CampaignsPage(): JSX.Element {
   const [channel, setChannel] = useState<{ id: string; configured: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: '', segment: 'ALL', offerType: 'PERCENT', offerValue: 10, startsAt: '', endsAt: '', usageLimit: '' });
+  const [form, setForm] = useState({ name: '', segment: 'ALL', offerType: 'PERCENT', offerValue: 10, startsAt: '', endsAt: '', usageLimit: '', minOrderValue: '', maxDiscount: '', maxUsesPerCustomer: '' });
 
   const load = useCallback(() => {
     setError(null);
@@ -49,6 +49,9 @@ export default function CampaignsPage(): JSX.Element {
         startsAt: form.startsAt || undefined,
         endsAt: form.endsAt || undefined,
         usageLimit: form.usageLimit ? Number(form.usageLimit) : undefined,
+        minOrderValue: form.minOrderValue ? Number(form.minOrderValue) : undefined,
+        maxDiscount: form.maxDiscount ? Number(form.maxDiscount) : undefined,
+        maxUsesPerCustomer: form.maxUsesPerCustomer ? Number(form.maxUsesPerCustomer) : undefined,
       });
       push('ok', msg);
       setForm({ ...form, name: '' });
@@ -131,6 +134,21 @@ export default function CampaignsPage(): JSX.Element {
               <label htmlFor="cp-limit">Conversion limit</label>
               <input id="cp-limit" className="input" type="number" min={1} placeholder="unlimited" value={form.usageLimit}
                 onChange={(e) => setForm({ ...form, usageLimit: e.target.value })} />
+              <div className="field">
+                <label htmlFor="cp-min">Minimum order (₹, optional)</label>
+                <input id="cp-min" className="input" type="number" min={0} placeholder="no minimum" value={form.minOrderValue}
+                  onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} />
+              </div>
+              <div className="field">
+                <label htmlFor="cp-maxdisc">Max discount (₹, percent offers, optional)</label>
+                <input id="cp-maxdisc" className="input" type="number" min={0} placeholder="no cap" value={form.maxDiscount}
+                  onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
+              </div>
+              <div className="field">
+                <label htmlFor="cp-percust">Uses per customer (optional)</label>
+                <input id="cp-percust" className="input" type="number" min={1} placeholder="unlimited" value={form.maxUsesPerCustomer}
+                  onChange={(e) => setForm({ ...form, maxUsesPerCustomer: e.target.value })} />
+              </div>
             </div>
           </div>
           <Button variant="primary" type="submit" loading={creating}>Create draft campaign</Button>
@@ -151,6 +169,9 @@ export default function CampaignsPage(): JSX.Element {
                     Code <span className="mono">{c.code}</span> · segment {c.segment}
                     {c.offerValue != null && c.offerType !== 'NONE' && <> · {c.offerType === 'PERCENT' ? `${c.offerValue}% off` : `${formatMoney(c.offerValue)} off`}</>}
                     {c.usageLimit != null && <> · limit {c.usageLimit}</>}
+                    {c.minOrderValue != null && <> · min ₹{c.minOrderValue}</>}
+                    {c.maxDiscount != null && <> · max ₹{c.maxDiscount}</>}
+                    {c.maxUsesPerCustomer != null && <> · {c.maxUsesPerCustomer}/customer</>}
                   </div>
                 </div>
                 <div className="campaign-actions">

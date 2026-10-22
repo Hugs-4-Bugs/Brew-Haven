@@ -1,27 +1,73 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '../api/cafe';
+import {
+  priceCart, createPaymentIntent, getIntent, getIntentQr, confirmCheckout, sandboxSettle, cancelIntent,
+  type PriceBreakdown, type CheckoutIntent, type CheckoutReceipt, type PayMethod,
+} from '../api/checkout';
 import { useAuth } from '../auth/useAuth';
 import { Button, Card, EmptyState, ErrorState, LoadingState, Modal, ToastStack, useToasts } from '../components/ui';
 import { downloadBlob, formatMoney } from '../utils/format';
 
-type PayMethod = 'CASH' | 'UPI' | 'UPI_QR' | 'CARD' | 'WALLET';
-type Stage = 'cart' | 'checkout' | 'paying' | 'done';
+type PayMethodPos = 'CASH' | 'UPI' | 'UPI_QR' | 'CARD' | 'WALLET';
+type Stage = 'cart' | 'checkout' | 'pay' | 'done' | 'failed';
 
 interface CartLine {
   product: api.ProductWrapper;
   quantity: number;
 }
 
-const UPI_KEY = 'cafe.upi.remembered';
-
-function loadRememberedUpi(): string {
-  try {
-    return localStorage.getItem(UPI_KEY) ?? '';
-  } catch {
-    return '';
-  }
+interface RazorpayHandlerResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
 }
 
+interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  theme?: { color?: string };
+  handler: (response: RazorpayHandlerResponse) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+interface RazorpayInstance { open: () => void; }
+interface WindowWithRazorpay extends Window { Razorpay?: new (options: RazorpayOptions) => RazorpayInstance; }
+
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(false);
+    const w = window as WindowWithRazorpay;
+    if (w.Razorpay) return resolve(true);
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
+function newSessionKey(): string {
+  try { return crypto.randomUUID(); } catch { return `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
+}
+
+/**
+ * POS billing — SERVER-PRICED checkout.
+ *
+ * All totals come from POST /checkout/price (backend pricing engine); the
+ * operator never types an amount. Payment methods:
+ *  - Cash: intent (method CASH) + assisted confirm -> bill at counter.
+ *  - UPI (VPA, counter-assisted): operator attests the payment after seeing it
+ *    in the merchant app; payment recorded against the server-priced intent.
+ *  - UPI QR: merchant QR for the EXACT server amount + live status polling
+ *    (SANDBOX) or the provider window (RAZORPAY).
+ *  - Card: provider-hosted checkout (raw card data is never collected here).
+ *  - Wallet: legacy counter-assisted deep-link flow (unchanged).
+ */
 export default function BillingPage(): JSX.Element {
   const { email } = useAuth();
   const { toasts, push, dismiss } = useToasts();
@@ -33,20 +79,24 @@ export default function BillingPage(): JSX.Element {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [stage, setStage] = useState<Stage>('cart');
   const [customer, setCustomer] = useState({ name: '', contactNumber: '', email: '' });
-  const [method, setMethod] = useState<PayMethod>('CASH');
+  const [method, setMethod] = useState<PayMethodPos>('CASH');
+
+  // server pricing + coupon
+  const [quote, setQuote] = useState<PriceBreakdown | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
 
   // payment state
-  const [upiId, setUpiId] = useState(loadRememberedUpi());
-  const [rememberUpi, setRememberUpi] = useState(!!loadRememberedUpi());
-  const [upiVerified, setUpiVerified] = useState(false);
-  const [qrDataUri, setQrDataUri] = useState<string | null>(null);
-  const [card, setCard] = useState({ cardNumber: '', cardHolderName: '', cardExpiry: '', cvv: '' });
-  const [walletType, setWalletType] = useState('phonepe');
+  const [upiId, setUpiId] = useState('');
+  const [intent, setIntent] = useState<CheckoutIntent | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
   const [walletUrl, setWalletUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [paid, setPaid] = useState<string | null>(null); // transaction id / 'cash'
-  const [billUuid, setBillUuid] = useState<string | null>(null);
-  const [paymentDone, setPaymentDone] = useState(false); // duplicate-payment guard
+  const sessionKey = useRef(newSessionKey());
 
   const load = useCallback(async () => {
     setError(null);
@@ -63,13 +113,60 @@ export default function BillingPage(): JSX.Element {
     void load();
   }, [load]);
 
-  const available = useMemo(() => (products ?? []).filter((p) => p.status === 'true'), [products]);
-  const visible = useMemo(
-    () => (selectedCategory === 'all' ? available : available.filter((p) => String(p.categoryId) === selectedCategory)),
-    [available, selectedCategory],
-  );
+  // Server pricing whenever the cart changes (amounts are never client-computed).
+  useEffect(() => {
+    let cancelled = false;
+    const run = async (): Promise<void> => {
+      if (cart.length === 0) {
+        if (!cancelled) { setQuote(null); setQuoteError(null); }
+        return;
+      }
+      try {
+        const q = await priceCart(
+          cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+          appliedCoupon ?? undefined,
+          customer.email || email || undefined,
+        );
+        if (!cancelled) { setQuote(q); setQuoteError(null); }
+      } catch (err) {
+        if (!cancelled) setQuoteError(err instanceof Error ? err.message : 'Pricing failed.');
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, appliedCoupon]);
 
-  const total = useMemo(() => cart.reduce((sum, l) => sum + (l.product.price ?? 0) * l.quantity, 0), [cart]);
+  // Live status polling while a SANDBOX payment is on screen.
+  useEffect(() => {
+    if (stage !== 'pay' || !intent || !intent.checkout?.sandbox) return;
+    const reference = intent.reference;
+    let stopped = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const st = await getIntent(reference);
+        if (stopped) return;
+        if (st.status === 'SUCCESS') {
+          setReceipt({
+            reference: st.reference, status: 'SUCCESS',
+            transactionId: st.providerPaymentId ?? st.reference,
+            amount: st.total, method: st.method, billUuid: st.billUuid ?? null,
+          });
+          setStage('done');
+          push('ok', 'Payment received.');
+        } else if (st.status === 'FAILED' || st.status === 'EXPIRED' || st.status === 'CANCELLED') {
+          setStage('failed');
+          push('err', 'Payment did not complete.');
+        }
+      } catch { /* keep polling */ }
+    };
+    const timer = window.setInterval(poll, 2500);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [stage, intent, push]);
+
+  const available = (products ?? []).filter((p) => p.status === 'true');
+  const visible = selectedCategory === 'all' ? available : available.filter((p) => String(p.categoryId) === selectedCategory);
+  const payable = quote?.total ?? 0;
 
   const addToCart = (product: api.ProductWrapper): void => {
     setCart((prev) => {
@@ -85,117 +182,200 @@ export default function BillingPage(): JSX.Element {
     setCart((prev) => (quantity <= 0 ? prev.filter((l) => l.product.id !== productId) : prev.map((l) => (l.product.id === productId ? { ...l, quantity } : l))));
   };
 
+  // ---------------------------------------------------------------- coupon (server-validated)
+
+  const applyCoupon = async (): Promise<void> => {
+    const code = couponInput.trim();
+    if (!code) { setCouponError('Enter an offer code first.'); return; }
+    if (cart.length === 0) { setCouponError('Add items to the cart first.'); return; }
+    setApplying(true);
+    setCouponError(null);
+    try {
+      const q = await priceCart(
+        cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+        code,
+        customer.email || email || undefined,
+      );
+      setQuote(q);
+      if (q.couponApplied) {
+        setAppliedCoupon(q.couponCode ?? code);
+        push('ok', `Offer ${q.couponCode} applied — ${formatMoney(q.discount)} off.`);
+      } else {
+        setAppliedCoupon(null);
+        setCouponError(q.couponRejectionReason ?? 'This coupon could not be applied.');
+      }
+    } catch (err) {
+      setCouponError(err instanceof Error ? err.message : 'Coupon check failed.');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const removeCoupon = (): void => {
+    setCouponInput('');
+    setCouponError(null);
+    setAppliedCoupon(null);
+  };
+
   // ---------------------------------------------------------------- payment actions
 
-  const verifyUpi = async (): Promise<void> => {
-    if (!upiId.trim()) {
-      push('err', 'Enter a UPI ID first.');
+  const clientKey = (m: PayMethod): string => {
+    const sig = cart.slice().sort((a, b) => a.product.id - b.product.id).map((l) => `${l.product.id}x${l.quantity}`).join(',');
+    return `${sessionKey.current}:${m}:${appliedCoupon || '-'}:${sig}`;
+  };
+
+  const createIntent = async (m: PayMethod): Promise<CheckoutIntent> => {
+    if (!customer.name.trim() || !customer.contactNumber.trim() || !customer.email.trim()) {
+      throw new Error('Fill the customer name, contact and email first.');
+    }
+    if (!quote) throw new Error(quoteError ?? 'Cart is not priced yet.');
+    return createPaymentIntent({
+      items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+      method: m,
+      clientKey: clientKey(m),
+      name: customer.name.trim(),
+      contactNumber: customer.contactNumber.trim(),
+      email: customer.email.trim(),
+      couponCode: appliedCoupon ?? undefined,
+      upiId: m === 'UPI' && upiId.trim() ? upiId.trim() : undefined,
+    });
+  };
+
+  const finish = (r: CheckoutReceipt): void => {
+    setReceipt(r);
+    setStage('done');
+    push('ok', 'Payment completed and bill generated.');
+  };
+
+  const payCash = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const created = await createIntent('CASH');
+      const r = await confirmCheckout({ reference: created.reference, assisted: true });
+      finish(r);
+    } catch (err) {
+      push('err', err instanceof Error ? err.message : 'Cash bill failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const payUpiAssisted = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const created = await createIntent('UPI');
+      const r = await confirmCheckout({ reference: created.reference, assisted: true });
+      finish(r);
+    } catch (err) {
+      push('err', err instanceof Error ? err.message : 'Assisted UPI confirmation failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openProviderWindow = async (created: CheckoutIntent): Promise<void> => {
+    const ok = await loadRazorpayScript();
+    const w = window as WindowWithRazorpay;
+    if (!ok || !w.Razorpay || !created.checkout?.keyId) {
+      push('err', 'Could not open the payment window.');
+      setStage('checkout');
       return;
     }
+    const rzp = new w.Razorpay({
+      key: created.checkout.keyId,
+      amount: created.checkout.amountPaise,
+      currency: created.checkout.currency,
+      name: 'Brew Haven',
+      description: `Order ${created.reference}`,
+      order_id: created.checkout.providerOrderId ?? '',
+      prefill: { name: customer.name, email: customer.email, contact: customer.contactNumber },
+      theme: { color: '#b45309' },
+      handler: (resp) => {
+        confirmCheckout({
+          reference: created.reference,
+          providerOrderId: resp.razorpay_order_id,
+          providerPaymentId: resp.razorpay_payment_id,
+          signature: resp.razorpay_signature,
+        })
+          .then(finish)
+          .catch((err) => {
+            push('err', err instanceof Error ? err.message : 'Payment verification failed.');
+            setStage('failed');
+          });
+      },
+      modal: { ondismiss: () => setStage('checkout') },
+    });
+    rzp.open();
+  };
+
+  const startUpiQr = async (): Promise<void> => {
     setBusy(true);
+    setQr(null);
     try {
-      const result = await api.verifyUpiId(upiId.trim());
-      if (result.valid) {
-        setUpiVerified(true);
-        push('ok', 'UPI ID verified.');
-      } else {
-        setUpiVerified(false);
-        push('err', 'This UPI ID does not look valid. Check the format (e.g. name@bank).');
+      const created = await createIntent('UPI');
+      setIntent(created);
+      setStage('pay');
+      if (!created.checkout?.sandbox) {
+        await openProviderWindow(created);
+        return;
       }
+      try {
+        setQr(await getIntentQr(created.reference));
+      } catch {
+        setQr(null);
+        push('err', 'Merchant UPI QR is not configured (set CAFE_UPI_PAYEE_VPA).');
+      }
+    } catch (err) {
+      push('err', err instanceof Error ? err.message : 'QR payment failed.');
     } finally {
       setBusy(false);
     }
   };
 
-  const payUpi = async (): Promise<void> => {
+  const startCard = async (): Promise<void> => {
     setBusy(true);
     try {
-      const message = await api.payWithUpi({
-        userId: email ?? 'pos-user',
-        upiId: upiId.trim(),
-        amount: total,
-        provider: 'UPI',
-      });
-      if (rememberUpi) {
-        try {
-          localStorage.setItem(UPI_KEY, upiId.trim());
-        } catch { /* ignore */ }
-      } else {
-        try {
-          localStorage.removeItem(UPI_KEY);
-        } catch { /* ignore */ }
+      const created = await createIntent('CARD');
+      setIntent(created);
+      if (!created.checkout?.sandbox) {
+        await openProviderWindow(created);
+        return;
       }
-      setPaid(message);
-      setPaymentDone(true);
-      push('ok', 'UPI payment recorded.');
+      setStage('pay');
     } catch (err) {
-      push('err', err instanceof Error ? err.message : 'UPI payment failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const showQr = async (): Promise<void> => {
-    setBusy(true);
-    setQrDataUri(null);
-    try {
-      const uri = await api.getUpiQr(total);
-      setQrDataUri(uri);
-    } catch (err) {
-      push('err', err instanceof Error ? err.message : 'QR generation failed.');
+      push('err', err instanceof Error ? err.message : 'Card payment failed.');
     } finally {
       setBusy(false);
     }
   };
 
   const confirmQrPaid = async (): Promise<void> => {
-    // QR payment confirmation records a UPI payment against the cafe's configured
-    // merchant payee. The POS convention marker VPA 'merchant-qr@cafe' is format-valid
-    // (backend validates NPCI format) and clearly labels QR-sourced payments; the
-    // actual payee encoded in the QR is the server-configured merchant VPA.
+    if (!intent) return;
     setBusy(true);
     try {
-      const message = await api.payWithUpi({
-        userId: email ?? 'pos-user',
-        upiId: 'merchant-qr@cafe',
-        amount: total,
-        provider: 'UPI-QR',
-      });
-      setPaid(message);
-      setPaymentDone(true);
-      push('ok', 'QR payment recorded after customer confirmation.');
+      const r = await confirmCheckout({ reference: intent.reference, assisted: true });
+      finish(r);
     } catch (err) {
-      push('err', err instanceof Error ? err.message : 'Payment recording failed.');
+      push('err', err instanceof Error ? err.message : 'Assisted confirmation failed.');
     } finally {
       setBusy(false);
     }
   };
 
-  const payCard = async (): Promise<void> => {
-    if (!/^\d{12,19}$/.test(card.cardNumber)) {
-      push('err', 'Card number must be 12-19 digits.');
-      return;
-    }
-    if (!card.cardHolderName.trim() || !card.cardExpiry.trim()) {
-      push('err', 'Card holder name and expiry are required.');
-      return;
-    }
+  const simulateSandbox = async (outcome: 'SUCCESS' | 'FAILED'): Promise<void> => {
+    if (!intent) return;
     setBusy(true);
     try {
-      const saved = await api.payWithCard({
-        userId: email ?? 'pos-user',
-        amount: total,
-        provider: 'CARD',
-        cardNumber: card.cardNumber,
-        cardHolderName: card.cardHolderName,
-        cardExpiry: card.cardExpiry,
-        cvv: card.cvv,
-      });
-      setPaid(saved?.transactionId ?? 'card');
-      setPaymentDone(true);
-      push('ok', 'Card payment recorded (card number stored masked).');
+      if (outcome === 'FAILED') {
+        await sandboxSettle(intent.reference, 'FAILED');
+        setStage('failed');
+        push('err', 'Test payment marked FAILED.');
+        return;
+      }
+      const r = await sandboxSettle(intent.reference, 'SUCCESS');
+      finish(r);
     } catch (err) {
-      push('err', err instanceof Error ? err.message : 'Card payment failed.');
+      push('err', err instanceof Error ? err.message : 'Test settlement failed.');
     } finally {
       setBusy(false);
     }
@@ -205,7 +385,7 @@ export default function BillingPage(): JSX.Element {
     setBusy(true);
     setWalletUrl(null);
     try {
-      const url = await api.payWithWallet(walletType, total);
+      const url = await api.payWithWallet('phonepe', payable);
       setWalletUrl(url);
     } catch (err) {
       push('err', err instanceof Error ? err.message : 'Wallet payment failed.');
@@ -215,20 +395,16 @@ export default function BillingPage(): JSX.Element {
   };
 
   const confirmWalletPaid = async (): Promise<void> => {
-    // The dedicated wallet endpoint returns only the deep-link URL; the payment record
-    // is persisted via the generic /api/payment/process endpoint (backend derives
-    // paymentType=WALLET for plain Payment payloads and stores walletType).
     setBusy(true);
     try {
-      const saved = await api.recordWalletPayment({
+      await api.recordWalletPayment({
         userId: email ?? 'pos-user',
-        amount: total,
-        walletType,
-        provider: walletType.toUpperCase(),
+        amount: payable,
+        walletType: 'phonepe',
+        provider: 'PHONEPE',
       });
-      setPaid(saved?.transactionId ?? 'wallet');
-      setPaymentDone(true);
-      push('ok', 'Wallet payment recorded.');
+      push('ok', 'Wallet payment recorded (counter-assisted).');
+      setStage('checkout');
     } catch (err) {
       push('err', err instanceof Error ? err.message : 'Wallet recording failed.');
     } finally {
@@ -236,46 +412,14 @@ export default function BillingPage(): JSX.Element {
     }
   };
 
-  // ---------------------------------------------------------------- bill
-
-  const generateBill = async (): Promise<void> => {
-    setBusy(true);
-    try {
-      const productDetails = JSON.stringify(
-        cart.map((l) => ({
-          id: l.product.id,
-          name: l.product.name,
-          category: l.product.categoryName ?? '',
-          quantity: l.quantity,
-          price: l.product.price ?? 0,
-          total: (l.product.price ?? 0) * l.quantity,
-        })),
-      );
-      const result = await api.generateBill({
-        name: customer.name.trim(),
-        contactNumber: customer.contactNumber.trim(),
-        email: customer.email.trim(),
-        paymentMethod: method === 'CASH' ? 'Cash' : method === 'UPI_QR' ? 'UPI' : method,
-        productDetails,
-        totalAmount: total,
-        isGenerate: true,
-      });
-      setBillUuid(result.uuid.trim());
-      setStage('done');
-      push('ok', 'Bill generated.');
-    } catch (err) {
-      push('err', err instanceof Error ? err.message : 'Bill generation failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
+  // ---------------------------------------------------------------- bill pdf + reset
 
   const downloadPdf = async (): Promise<void> => {
-    if (!billUuid) return;
+    if (!receipt?.billUuid) return;
     setBusy(true);
     try {
-      const blob = await api.downloadBillPdf(billUuid);
-      downloadBlob(blob, `${billUuid}.pdf`);
+      const blob = await api.downloadBillPdf(receipt.billUuid);
+      downloadBlob(blob, `${receipt.billUuid}.pdf`);
     } catch (err) {
       push('err', err instanceof Error ? err.message : 'PDF download failed.');
     } finally {
@@ -288,37 +432,54 @@ export default function BillingPage(): JSX.Element {
     setStage('cart');
     setCustomer({ name: '', contactNumber: '', email: '' });
     setMethod('CASH');
-    setUpiVerified(false);
-    setQrDataUri(null);
+    setQuote(null);
+    setCouponInput('');
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setIntent(null);
+    setQr(null);
+    setReceipt(null);
     setWalletUrl(null);
-    setPaid(null);
-    setBillUuid(null);
-    setPaymentDone(false);
-    setCard({ cardNumber: '', cardHolderName: '', cardExpiry: '', cvv: '' });
+    setUpiId('');
+    sessionKey.current = newSessionKey();
+  };
+
+  const closePayStage = (): void => {
+    if (intent && stage === 'pay') void cancelIntent(intent.reference).catch(() => undefined);
+    setIntent(null);
+    setQr(null);
+    setStage('checkout');
   };
 
   // ---------------------------------------------------------------- render
 
-  const menuTitle = useMemo(() => {
-    if (selectedCategory === 'all') return 'Menu';
-    const cat = categories.find((c) => String(c.id) === selectedCategory);
-    return cat ? `Menu — ${cat.name}` : 'Menu';
-  }, [selectedCategory, categories]);
+  const menuTitle = selectedCategory === 'all'
+    ? 'Menu'
+    : `Menu — ${categories.find((c) => String(c.id) === selectedCategory)?.name ?? ''}`;
 
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!products) return <LoadingState label="Loading menu…" />;
 
-  if (stage === 'done') {
+  if (stage === 'done' && receipt) {
     return (
       <Card className="card" title="Bill completed">
         <div className="state-box">
-          <div className="state-ico" aria-hidden="true">✅</div>
-          <h3>Bill {billUuid} generated</h3>
-          <p>
-            Total <strong>{formatMoney(total)}</strong> · {paid === 'cash' ? 'Paid by cash' : `Payment recorded (${paid})`}
-          </p>
+          <div className="state-ico" aria-hidden="true">{receipt.method === 'CASH' ? '🧾' : '✅'}</div>
+          <h3>{receipt.method === 'CASH' ? 'Order placed — pay at counter' : 'Payment Successful'}</h3>
+          <div className="receipt" style={{ maxWidth: 420, margin: '10px auto' }}>
+            <div className="receipt-row"><span>Bill</span><span>{receipt.billUuid ?? '—'}</span></div>
+            <div className="receipt-row"><span>{receipt.method === 'CASH' ? 'Payable at counter' : 'Amount Paid'}</span><span>{formatMoney(receipt.amount)}</span></div>
+            {(receipt.discount ?? 0) > 0 && (
+              <div className="receipt-row pb-discount">
+                <span>Offer {receipt.couponCode ? `(${receipt.couponCode})` : ''}</span>
+                <span>−{formatMoney(receipt.discount ?? 0)} on {formatMoney(receipt.subtotal ?? 0)}</span>
+              </div>
+            )}
+            <div className="receipt-row"><span>Payment Method</span><span>{receipt.method}</span></div>
+            <div className="receipt-row"><span>Transaction ID</span><span>{receipt.transactionId ?? receipt.reference}</span></div>
+          </div>
           <div className="row mt-2" style={{ justifyContent: 'center' }}>
-            <Button variant="primary" onClick={() => void downloadPdf()} loading={busy}>
+            <Button variant="primary" onClick={() => void downloadPdf()} loading={busy} disabled={!receipt.billUuid}>
               ⬇ Download PDF
             </Button>
             <Button onClick={startNewBill}>Start new bill</Button>
@@ -384,11 +545,24 @@ export default function BillingPage(): JSX.Element {
                   <strong style={{ width: 74, textAlign: 'right' }}>{formatMoney((line.product.price ?? 0) * line.quantity)}</strong>
                 </div>
               ))}
-              <div className="spread mt-2" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-                <span style={{ fontWeight: 700 }}>Total</span>
-                <span style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent-strong)' }}>{formatMoney(total)}</span>
-              </div>
-              <Button variant="primary" className="mt-2" style={{ width: '100%' }} onClick={() => setStage('checkout')}>
+
+              {/* Server-authoritative pricing */}
+              {quoteError && <p className="field-error" role="alert">{quoteError}</p>}
+              {quote && (
+                <div className="price-breakdown mt-2" aria-label="Price breakdown">
+                  <div className="pb-row"><span>Subtotal</span><span>{formatMoney(quote.subtotal)}</span></div>
+                  {quote.discount > 0 && (
+                    <div className="pb-row pb-discount">
+                      <span>Discount{quote.couponCode ? ` (${quote.couponCode})` : ''}</span>
+                      <span>−{formatMoney(quote.discount)}</span>
+                    </div>
+                  )}
+                  {quote.tax > 0 && <div className="pb-row"><span>Tax / fees</span><span>{formatMoney(quote.tax)}</span></div>}
+                  <div className="pb-row pb-total"><span>Payable</span><span>{formatMoney(quote.total)}</span></div>
+                </div>
+              )}
+
+              <Button variant="primary" className="mt-2" style={{ width: '100%' }} onClick={() => setStage('checkout')} disabled={!quote || !!quoteError}>
                 Proceed to checkout →
               </Button>
             </>
@@ -413,113 +587,103 @@ export default function BillingPage(): JSX.Element {
               <input id="co-email" className="input" type="email" value={customer.email} onChange={(e) => setCustomer({ ...customer, email: e.target.value })} />
             </div>
           </div>
+
+          {/* Coupon with explicit APPLY — validated + priced server-side */}
+          <div className="field">
+            <label htmlFor="co-coupon">Offer code</label>
+            {appliedCoupon ? (
+              <div className="coupon-applied-chip">
+                <span>✓ {appliedCoupon} applied — {formatMoney(quote?.discount ?? 0)} off</span>
+                <button type="button" className="linklike" onClick={removeCoupon}>remove</button>
+              </div>
+            ) : (
+              <div className="coupon-row">
+                <input
+                  id="co-coupon"
+                  className="input"
+                  placeholder="e.g. BREW3"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                />
+                <Button size="sm" onClick={() => void applyCoupon()} loading={applying} disabled={cart.length === 0}>
+                  APPLY
+                </Button>
+              </div>
+            )}
+            {couponError && <span className="field-hint pb-coupon-error" role="alert">{couponError}</span>}
+          </div>
+
           <div className="field">
             <label htmlFor="co-method">Payment method</label>
-            <select id="co-method" className="select" value={method} onChange={(e) => { setMethod(e.target.value as PayMethod); setUpiVerified(false); setQrDataUri(null); setWalletUrl(null); }}>
+            <select id="co-method" className="select" value={method} onChange={(e) => { setMethod(e.target.value as PayMethodPos); setWalletUrl(null); }}>
               <option value="CASH">Cash</option>
-              <option value="UPI">UPI — VPA</option>
-              <option value="UPI_QR">UPI — QR code</option>
-              <option value="CARD">Card</option>
-              <option value="WALLET">Wallet (PhonePe / Paytm / GPay)</option>
+              <option value="UPI">UPI — counter-assisted (VPA)</option>
+              <option value="UPI_QR">UPI — QR / payment window</option>
+              <option value="CARD">Card — provider checkout</option>
+              <option value="WALLET">Wallet (legacy counter-assisted)</option>
             </select>
           </div>
 
           {method === 'UPI' && (
             <div className="card" style={{ background: 'var(--bg-2)' }}>
               <div className="field" style={{ marginBottom: 8 }}>
-                <label htmlFor="upi-id">UPI ID (VPA)</label>
+                <label htmlFor="upi-id">Customer UPI ID (VPA — optional, for the record)</label>
                 <input
                   id="upi-id"
                   className="input"
                   placeholder="name@bank"
                   value={upiId}
-                  onChange={(e) => { setUpiId(e.target.value); setUpiVerified(false); }}
+                  onChange={(e) => setUpiId(e.target.value)}
                 />
               </div>
-              <label className="row mb-1" style={{ cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={rememberUpi} onChange={(e) => setRememberUpi(e.target.checked)} />
-                Remember this UPI ID on this device
-              </label>
-              <div className="row">
-                <Button size="sm" onClick={() => void verifyUpi()} loading={busy} disabled={upiVerified}>
-                  {upiVerified ? '✓ Verified' : 'Verify'}
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => void payUpi()} loading={busy} disabled={!upiVerified || paymentDone}>
-                  Pay {formatMoney(total)}
-                </Button>
-              </div>
-              {upiVerified && <p className="muted mt-1">Verified — the same UPI ID can be reused for future payments.</p>}
+              <p className="muted" style={{ fontSize: 13 }}>
+                Counter-assisted: confirm after the payment appears in the merchant UPI app.
+                The amount is fixed at the server-computed {formatMoney(payable)}.
+              </p>
+              <Button size="sm" variant="primary" onClick={() => void payUpiAssisted()} loading={busy} disabled={!quote}>
+                Customer paid — confirm {formatMoney(payable)}
+              </Button>
             </div>
           )}
 
           {method === 'UPI_QR' && (
             <div className="qr-box">
-              <p className="muted">QR encodes the cafe's configured merchant UPI — scan with any UPI app.</p>
-              {qrDataUri ? (
-                <>
-                  <img src={qrDataUri} alt="UPI payment QR code" />
-                  <div className="row mt-2" style={{ justifyContent: 'center' }}>
-                    <Button size="sm" onClick={() => void showQr()} loading={busy}>Regenerate</Button>
-                    <Button size="sm" variant="primary" onClick={() => void confirmQrPaid()} loading={busy} disabled={paymentDone}>
-                      Customer paid — confirm
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <Button variant="primary" onClick={() => void showQr()} loading={busy} disabled={paymentDone}>
-                  Show QR for {formatMoney(total)}
-                </Button>
-              )}
+              <p className="muted">
+                Starts a payment intent for the exact server amount ({formatMoney(payable)}), then shows the
+                merchant QR (sandbox) or opens the provider payment window.
+              </p>
+              <Button variant="primary" onClick={() => void startUpiQr()} loading={busy} disabled={!quote}>
+                Start UPI payment — {formatMoney(payable)}
+              </Button>
             </div>
           )}
 
           {method === 'CARD' && (
             <div className="card" style={{ background: 'var(--bg-2)' }}>
-              <div className="field" style={{ marginBottom: 8 }}>
-                <label htmlFor="cc-num">Card number (12–19 digits)</label>
-                <input id="cc-num" className="input" inputMode="numeric" value={card.cardNumber} onChange={(e) => setCard({ ...card, cardNumber: e.target.value.replace(/\D/g, '') })} />
-              </div>
-              <div className="field" style={{ marginBottom: 8 }}>
-                <label htmlFor="cc-name">Card holder name</label>
-                <input id="cc-name" className="input" value={card.cardHolderName} onChange={(e) => setCard({ ...card, cardHolderName: e.target.value })} />
-              </div>
-              <div className="form-row">
-                <div className="field" style={{ marginBottom: 8 }}>
-                  <label htmlFor="cc-exp">Expiry (MM/YY)</label>
-                  <input id="cc-exp" className="input" placeholder="12/28" value={card.cardExpiry} onChange={(e) => setCard({ ...card, cardExpiry: e.target.value })} />
-                </div>
-                <div className="field" style={{ marginBottom: 8 }}>
-                  <label htmlFor="cc-cvv">CVV</label>
-                  <input id="cc-cvv" className="input" inputMode="numeric" type="password" value={card.cvv} onChange={(e) => setCard({ ...card, cvv: e.target.value.replace(/\D/g, '').slice(0, 4) })} />
-                </div>
-              </div>
-              <p className="muted">Only the masked number (last 4 digits) is stored. CVV is never persisted.</p>
-              <Button size="sm" variant="primary" className="mt-1" onClick={() => void payCard()} loading={busy} disabled={paymentDone}>
-                Charge {formatMoney(total)}
+              <p className="muted" style={{ fontSize: 13 }}>
+                Card details are collected by the payment provider's secure checkout —
+                raw card numbers and CVV are never entered into or stored by this system.
+              </p>
+              <Button size="sm" variant="primary" onClick={() => void startCard()} loading={busy} disabled={!quote}>
+                Charge card — {formatMoney(payable)}
               </Button>
             </div>
           )}
 
           {method === 'WALLET' && (
             <div className="card" style={{ background: 'var(--bg-2)' }}>
-              <div className="field" style={{ marginBottom: 8 }}>
-                <label htmlFor="w-type">Wallet</label>
-                <select id="w-type" className="select" value={walletType} onChange={(e) => setWalletType(e.target.value)}>
-                  <option value="phonepe">PhonePe</option>
-                  <option value="paytm">Paytm</option>
-                  <option value="googlepay">Google Pay</option>
-                </select>
-              </div>
+              <p className="muted" style={{ fontSize: 13 }}>
+                Legacy counter-assisted wallet flow (deep-link + operator record).
+              </p>
               {walletUrl ? (
                 <>
-                  <p className="muted">Deep-link generated. Open it in the wallet app, then confirm once paid:</p>
                   <p className="mono" style={{ wordBreak: 'break-all' }}>{walletUrl}</p>
-                  <Button size="sm" variant="primary" onClick={() => void confirmWalletPaid()} loading={busy} disabled={paymentDone}>
+                  <Button size="sm" variant="primary" onClick={() => void confirmWalletPaid()} loading={busy}>
                     Customer paid — confirm
                   </Button>
                 </>
               ) : (
-                <Button size="sm" onClick={() => void payWallet()} loading={busy} disabled={paymentDone}>
+                <Button size="sm" onClick={() => void payWallet()} loading={busy} disabled={!quote}>
                   Generate wallet link
                 </Button>
               )}
@@ -527,27 +691,80 @@ export default function BillingPage(): JSX.Element {
           )}
 
           {method === 'CASH' && (
-            <p className="muted">Cash payment — the bill is generated without a payment-gateway step.</p>
-          )}
-
-          {paymentDone && (
-            <p style={{ color: 'var(--success)', fontSize: 13.5 }}>
-              ✓ Payment recorded{paid && paid !== 'cash' ? ` (${paid})` : ''}. Duplicate payment for this bill is blocked.
-            </p>
+            <div className="card" style={{ background: 'var(--bg-2)' }}>
+              <p className="muted" style={{ fontSize: 13 }}>
+                Generates the bill at the server-computed amount ({formatMoney(payable)}); the customer
+                pays physically at the counter. No gateway payment is claimed.
+              </p>
+              <Button size="sm" variant="primary" onClick={() => void payCash()} loading={busy} disabled={!quote}>
+                Create cash bill — {formatMoney(payable)}
+              </Button>
+            </div>
           )}
 
           <div className="modal-actions">
             <Button variant="ghost" onClick={() => setStage('cart')}>Back to cart</Button>
-            <Button
-              variant="primary"
-              loading={busy}
-              disabled={cart.length === 0 || (!paymentDone && method !== 'CASH')}
-              onClick={() => void generateBill()}
-            >
-              Generate bill
+          </div>
+        </Modal>
+      )}
+
+      {/* ------------------------------------------------- pay / waiting modal */}
+      {stage === 'pay' && intent && (
+        <Modal title="Payment in progress" onClose={closePayStage}>
+          <div className="pay-panel">
+            <div className="pay-amount">{formatMoney(intent.total)}</div>
+            <div className="pay-ref">Reference <code>{intent.reference}</code> · {intent.method}</div>
+
+            {qr && (
+              <div>
+                <div className="pay-qr" style={{ margin: '0 auto' }}>
+                  <img src={qr} alt={`UPI QR for ${formatMoney(intent.total)}`} />
+                </div>
+                <p className="muted" style={{ fontSize: 13 }}>Amount is fixed at {formatMoney(intent.total)} — scan with any UPI app.</p>
+              </div>
+            )}
+
+            <div className="status-chip status-waiting" role="status">
+              <span className="dot" aria-hidden="true" />
+              Waiting for payment…
+            </div>
+
+            {intent.checkout?.sandbox && (
+              <div className="sandbox-panel">
+                <div className="sandbox-title">SANDBOX — TEST PAYMENT</div>
+                <p className="sandbox-note">
+                  No real provider is configured. Simulate the provider webhook outcome for testing.
+                </p>
+                <div className="sandbox-actions">
+                  <Button size="sm" variant="primary" onClick={() => void simulateSandbox('SUCCESS')} loading={busy}>
+                    Simulate success
+                  </Button>
+                  <Button size="sm" onClick={() => void simulateSandbox('FAILED')} loading={busy}>
+                    Simulate failure
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <Button size="sm" onClick={() => void confirmQrPaid()} loading={busy}>
+              Customer paid — staff confirm (assisted)
             </Button>
           </div>
-          {!customer.name.trim() && <p className="muted">Tip: fill the customer name for the PDF header.</p>}
+        </Modal>
+      )}
+
+      {/* ------------------------------------------------- failed modal */}
+      {stage === 'failed' && (
+        <Modal title="Payment failed" onClose={() => setStage('checkout')}>
+          <div className="pay-panel">
+            <div className="status-chip status-failed" role="status">Payment failed — Try again</div>
+            <p className="muted" style={{ fontSize: 13 }}>
+              No money was captured and no bill was created. Duplicate attempts are blocked by the server.
+            </p>
+            <Button variant="primary" onClick={() => { sessionKey.current = newSessionKey(); setIntent(null); setQr(null); setStage('checkout'); }}>
+              Back to checkout
+            </Button>
+          </div>
         </Modal>
       )}
 

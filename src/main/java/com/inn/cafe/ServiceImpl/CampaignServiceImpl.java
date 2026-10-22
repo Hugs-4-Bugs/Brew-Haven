@@ -85,6 +85,22 @@ public class CampaignServiceImpl implements CampaignService {
             c.setStartsAt(startsAt);
             c.setEndsAt(endsAt);
             c.setUsageLimit(parseIntOrNull(requestMap.get("usageLimit")));
+            // ADDITIVE coupon rules (nullable, validated) — see POJO/Campaign.
+            Integer minOrderValue = parseIntOrNull(requestMap.get("minOrderValue"));
+            Integer maxDiscount = parseIntOrNull(requestMap.get("maxDiscount"));
+            Integer maxUsesPerCustomer = parseIntOrNull(requestMap.get("maxUsesPerCustomer"));
+            if (minOrderValue != null && minOrderValue < 0) {
+                return CafeUtils.getResponseEntity("Invalid minimum order value", HttpStatus.BAD_REQUEST);
+            }
+            if (maxDiscount != null && maxDiscount < 0) {
+                return CafeUtils.getResponseEntity("Invalid maximum discount", HttpStatus.BAD_REQUEST);
+            }
+            if (maxUsesPerCustomer != null && maxUsesPerCustomer < 0) {
+                return CafeUtils.getResponseEntity("Invalid per-customer usage limit", HttpStatus.BAD_REQUEST);
+            }
+            c.setMinOrderValue(minOrderValue);
+            c.setMaxDiscount(maxDiscount);
+            c.setMaxUsesPerCustomer(maxUsesPerCustomer);
             c.setStatus(Campaign.STATUS_DRAFT);
             c.setCreatedBy(jwtFilter.getCurrentUser());
             c.setCreatedAt(new Date());
@@ -122,6 +138,9 @@ public class CampaignServiceImpl implements CampaignService {
             m.put("endsAt", c.getEndsAt());
             m.put("status", c.getStatus());
             m.put("usageLimit", c.getUsageLimit());
+            m.put("minOrderValue", c.getMinOrderValue());
+            m.put("maxDiscount", c.getMaxDiscount());
+            m.put("maxUsesPerCustomer", c.getMaxUsesPerCustomer());
             m.put("createdBy", c.getCreatedBy());
             return m;
         }).collect(Collectors.toList());

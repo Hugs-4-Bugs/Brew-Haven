@@ -46,6 +46,13 @@ public interface PaymentService {
     String generateQrCode(String upiId, double amount);
 
     /**
+     * ADDITIVE: QR for the checkout flow — encodes the SERVER-CONFIGURED
+     * merchant payee and a SERVER-COMPUTED amount (from the payment intent),
+     * with the payment reference embedded in the note for reconciliation.
+     */
+    String generateQrCode(double amount, String note);
+
+    /**
      * Handle wallet-based payments and return a redirection link.
      * The method will generate a URL for payment redirection.
      * @param walletType The type of wallet (e.g., PhonePe, Paytm, Google Pay).

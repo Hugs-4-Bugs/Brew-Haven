@@ -153,6 +153,17 @@ public class PaymentServiceImpl implements PaymentService {
      */
     @Override
     public String generateQrCode(String upiId, double amount) {
+        return generateQrCode(amount, "Cafe order payment");
+    }
+
+    /**
+     * ADDITIVE (checkout flow): the amount is the SERVER-COMPUTED intent total
+     * and the note carries the payment reference — the QR can therefore only
+     * ever request the exact amount the pricing engine calculated, for the
+     * server-configured merchant payee.
+     */
+    @Override
+    public String generateQrCode(double amount, String note) {
         if (payeeVpa == null || payeeVpa.isBlank() || !PaymentUtils.validateUpiId(payeeVpa.trim())) {
             log.error("UPI QR requested but cafe.upi.payee-vpa is not configured or invalid — failing safe.");
             throw new IllegalStateException("UPI payee is not configured on the server. Set cafe.upi.payee-vpa.");
@@ -166,7 +177,7 @@ public class PaymentServiceImpl implements PaymentService {
                     + "&pn=" + urlEncode(payeeName == null || payeeName.isBlank() ? "Cafe" : payeeName.trim())
                     + "&am=" + String.format(Locale.ROOT, "%.2f", amount)
                     + "&cu=" + (currency == null || currency.isBlank() ? "INR" : currency.trim().toUpperCase(Locale.ROOT))
-                    + "&tn=" + urlEncode("Cafe order payment");
+                    + "&tn=" + urlEncode(note == null || note.isBlank() ? "Cafe order payment" : note);
             log.info("Generating UPI QR for configured payee '{}' (amount {})", vpa, amount);
 
             BitMatrix matrix = new QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 300, 300);

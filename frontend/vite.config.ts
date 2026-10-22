@@ -29,6 +29,8 @@ export default defineConfig({
       '/feedback/': { target: 'http://localhost:8000', changeOrigin: true },
       '/events/': { target: 'http://localhost:8000', changeOrigin: true },
       '/automation/': { target: 'http://localhost:8000', changeOrigin: true },
+      // Payment platform routes (checkout pricing / intents / webhook land on the backend).
+      '/checkout/': { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
   build: {

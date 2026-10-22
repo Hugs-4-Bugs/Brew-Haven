@@ -32,6 +32,28 @@ dashboard with real analytics.
 ### 2. Backend
 
 ```bash
+
+## Payment platform (checkout)
+
+The checkout flow prices everything SERVER-SIDE (DB product prices -> coupon -> tax -> payable).
+Two payment modes:
+
+- `PAYMENT_PROVIDER=AUTO` (default): Razorpay when keys are present, otherwise SANDBOX (local test mode, no external calls).
+- `PAYMENT_PROVIDER=RAZORPAY`: production — fails fast at startup without real keys.
+- `PAYMENT_PROVIDER=SANDBOX`: force local test mode (settlements via the gated `/checkout/sandbox/settle`).
+
+Required for real payments (never committed; the SECRET stays server-side):
+
+```bash
+PAYMENT_PROVIDER_KEY=            # Razorpay key id (public)
+PAYMENT_PROVIDER_SECRET=         # Razorpay key secret (SERVER ONLY)
+PAYMENT_PROVIDER_WEBHOOK_SECRET= # webhook HMAC secret (X-Razorpay-Signature)
+CAFE_UPI_PAYEE_VPA=              # merchant VPA for the QR (sandbox/assisted)
+CAFE_PAYMENT_TAX_PERCENT=0       # optional tax percent on the discounted base
+```
+
+See `docs/verification/PAYMENT_PLATFORM.md` for the full architecture and verification report.
+
 # configure (defaults work for a local root-password-less MySQL; override via env in real envs)
 export DB_URL='jdbc:mysql://localhost:3306/CafeMgt?createDatabaseIfNotExist=true'
 export DB_USERNAME=root

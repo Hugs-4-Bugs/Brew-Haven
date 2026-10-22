@@ -12,4 +12,7 @@ public interface CampaignEventDao extends JpaRepository<CampaignEvent, Integer> 
     List<CampaignEvent> findByCampaignIdAndEventType(Integer campaignId, String eventType);
     List<CampaignEvent> findByCampaignIdAndEventTypeAndBillId(Integer campaignId, String eventType, Integer billId);
     long countByCampaignIdAndEventType(Integer campaignId, String eventType);
+
+    /** ADDITIVE: per-customer coupon usage (CONVERTED events by campaign + email). */
+    long countByCampaignIdAndEventTypeAndEmail(Integer campaignId, String eventType, String email);
 }

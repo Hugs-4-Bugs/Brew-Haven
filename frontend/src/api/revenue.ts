@@ -141,6 +141,9 @@ export interface AdminCampaign {
   endsAt: string;
   status: string;
   usageLimit: number | null;
+  minOrderValue?: number | null;
+  maxDiscount?: number | null;
+  maxUsesPerCustomer?: number | null;
   createdBy: string;
 }
 
@@ -165,6 +168,9 @@ export async function createCampaign(payload: {
   startsAt?: string;
   endsAt?: string;
   usageLimit?: number;
+  minOrderValue?: number;
+  maxDiscount?: number;
+  maxUsesPerCustomer?: number;
 }): Promise<string> {
   return requestMessage('/campaign/create', { method: 'POST', body: payload });
 }

@@ -101,6 +101,11 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 // instead of a misleading 403.
                 .antMatchers("/error").permitAll()
 
+                // Payment provider webhook — unauthenticated by design (provider servers
+                // cannot carry our JWT); authenticity is enforced by the HMAC signature
+                // verification inside the handler (X-Razorpay-Signature).
+                .antMatchers("/checkout/webhook").permitAll()
+
                 // NOTE (DEFECT_REGISTER A.8): the legacy matcher "/api/category/**" never
                 // matched the real /category/** paths and was removed. Admin enforcement for
                 // /category/**, /product/** mutations, /user/get, /user/update, bill deletion

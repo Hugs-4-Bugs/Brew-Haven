@@ -77,6 +77,19 @@ public class Campaign implements Serializable {
     @Column(name = "usage_limit")
     private Integer usageLimit;
 
+    /** ADDITIVE coupon rules (nullable — existing campaigns keep NULL = no rule):
+     *  minimum cart subtotal (whole rupees) required to use this coupon. */
+    @Column(name = "min_order_value")
+    private Integer minOrderValue;
+
+    /** Maximum discount (whole rupees) for PERCENT offers (null = no cap). */
+    @Column(name = "max_discount")
+    private Integer maxDiscount;
+
+    /** How many times ONE customer (by email) may use this coupon (null = unlimited). */
+    @Column(name = "max_uses_per_customer")
+    private Integer maxUsesPerCustomer;
+
     @Column(name = "created_by", length = 255)
     private String createdBy;
 
