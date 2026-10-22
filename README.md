@@ -48,7 +48,7 @@ Required for real payments (never committed; the SECRET stays server-side):
 PAYMENT_PROVIDER_KEY=            # Razorpay key id (public)
 PAYMENT_PROVIDER_SECRET=         # Razorpay key secret (SERVER ONLY)
 PAYMENT_PROVIDER_WEBHOOK_SECRET= # webhook HMAC secret (X-Razorpay-Signature)
-CAFE_UPI_PAYEE_VPA=              # merchant VPA for the QR (sandbox/assisted)
+CAFE_UPI_PAYEE_VPA=              # OPTIONAL: merchant VPA for the QR (bundled default 7250063206-3@ybl in application.properties)
 CAFE_PAYMENT_TAX_PERCENT=0       # optional tax percent on the discounted base
 ```
 
@@ -61,8 +61,10 @@ export DB_PASSWORD=''
 # first admin (created at startup when no admin exists; optional but recommended)
 export CAFE_BOOTSTRAP_ADMIN_EMAIL=admin@cafe.local
 export CAFE_BOOTSTRAP_ADMIN_PASSWORD='choose-a-strong-password'
-# UPI QR merchant payee (required for QR generation; QR fails safe with 503 when unset)
-export CAFE_UPI_PAYEE_VPA='yourmerchant@upi'
+# UPI QR merchant payee: a real collection VPA (7250063206-3@ybl) is BUNDLED as the default in
+# application.properties, so the QR works out of the box. Export ONLY to override it
+# for a different merchant account (a blank value fails safe with HTTP 503).
+# export CAFE_UPI_PAYEE_VPA='7250063206-3@ybl'
 
 mvn spring-boot:run         # -> http://localhost:8000 (Swagger UI: /swagger-ui/index.html)
 ```
