@@ -1,8 +1,8 @@
 /**
  * Guest navigation bar — public, auth-aware, no sidebar.
- * Authenticated staff/users get a direct "Open dashboard" link; anonymous
- * guests get Sign in / Create account. Existing app navigation (sidebar
- * Layout) is untouched.
+ * Signed-in ADMINS get a direct "Open dashboard" link; signed-in CUSTOMERS
+ * get "My account" (change password) — customers live on the guest surface.
+ * Anonymous guests get Sign in / Create account.
  */
 
 import { Link, NavLink } from 'react-router-dom';
@@ -16,7 +16,7 @@ interface GuestNavProps {
 }
 
 export default function GuestNav({ onEditPreferences, prefRecord }: GuestNavProps): JSX.Element {
-  const { token } = useAuth();
+  const { token, isAdmin } = useAuth();
   const hasPrefs = prefRecord?.status === 'saved';
 
   return (
@@ -43,9 +43,15 @@ export default function GuestNav({ onEditPreferences, prefRecord }: GuestNavProp
         </nav>
         <div className="gnav-auth">
           {token ? (
-            <Link to="/dashboard" className="btn btn-primary gnav-cta">
-              Open dashboard
-            </Link>
+            isAdmin ? (
+              <Link to="/dashboard" className="btn btn-primary gnav-cta">
+                Open dashboard
+              </Link>
+            ) : (
+              <Link to="/change-password" className="btn btn-outline gnav-cta">
+                My account
+              </Link>
+            )
           ) : (
             <>
               <Link to="/login" className="btn btn-outline gnav-cta">

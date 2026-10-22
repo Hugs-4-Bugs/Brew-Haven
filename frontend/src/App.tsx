@@ -25,7 +25,8 @@ function RequireAuth({ children, adminOnly = false }: { children: JSX.Element; a
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
   if (adminOnly && !isAdmin) {
-    return <Navigate to="/dashboard" replace />;
+    // Non-admins (customers) are pointed at the guest experience, not the staff console.
+    return <Navigate to="/" replace />;
   }
   return children;
 }
@@ -42,7 +43,7 @@ export default function App(): JSX.Element {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-        {/* ------------------------------- authenticated app (unchanged routes) */}
+        {/* ------------- authenticated app: management = admin-only, account = all roles */}
         <Route
           element={
             <ProtectedRoute>
@@ -53,7 +54,7 @@ export default function App(): JSX.Element {
           <Route
             path="dashboard"
             element={
-              <RequireAuth>
+              <RequireAuth adminOnly>
                 <DashboardPage />
               </RequireAuth>
             }
@@ -61,7 +62,7 @@ export default function App(): JSX.Element {
           <Route
             path="billing"
             element={
-              <RequireAuth>
+              <RequireAuth adminOnly>
                 <BillingPage />
               </RequireAuth>
             }
@@ -69,7 +70,7 @@ export default function App(): JSX.Element {
           <Route
             path="bills"
             element={
-              <RequireAuth>
+              <RequireAuth adminOnly>
                 <BillsPage />
               </RequireAuth>
             }
@@ -77,7 +78,7 @@ export default function App(): JSX.Element {
           <Route
             path="products"
             element={
-              <RequireAuth>
+              <RequireAuth adminOnly>
                 <ProductsPage />
               </RequireAuth>
             }
@@ -85,7 +86,7 @@ export default function App(): JSX.Element {
           <Route
             path="categories"
             element={
-              <RequireAuth>
+              <RequireAuth adminOnly>
                 <CategoriesPage />
               </RequireAuth>
             }

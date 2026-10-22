@@ -229,7 +229,7 @@ export default function GuestHomePage(): JSX.Element {
           <span className="guest-footer-brand">☕ Brew Haven</span>
           <nav aria-label="Footer">
             <Link to="/menu">Menu</Link>
-            <Link to="/login">Staff sign in</Link>
+            <Link to="/login">Sign in</Link>
             <Link to="/signup">Create account</Link>
           </nav>
           <p className="guest-footer-note">

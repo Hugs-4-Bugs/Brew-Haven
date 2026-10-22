@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
+import { postLoginDestination } from '../auth/postLoginDestination';
+import { decodeJwtRole, getToken } from '../api/client';
 import { Button } from '../components/ui';
 
 /**
@@ -28,7 +30,10 @@ export default function LoginPage(): JSX.Element {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate(location.state?.from && location.state.from !== '/login' ? location.state.from : '/dashboard', { replace: true });
+      // Role-aware landing: admins open the management dashboard, normal
+      // customers open the guest (restaurant) experience.
+      const role = getToken() ? decodeJwtRole(getToken() as string) : null;
+      navigate(postLoginDestination(role, location.state?.from), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
